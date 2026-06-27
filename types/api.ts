@@ -79,6 +79,7 @@ export interface RiskReport {
   department_id?: number;
   department?: Department;
   description: string;
+  risk_level_origin?: RiskLevel;
   risk_level: RiskLevel;
   priority: Priority;
   status: ReportStatus;

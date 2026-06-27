@@ -545,7 +545,7 @@ export default function ReportDetailPage() {
                 {/* ── Kolom kiri: lokasi, dept, deskripsi ────────────────────────── */}
                 <div className="space-y-4">
                     <ColumnCard title="Detection">
-                        <div className="grid grid-cols-2 gap-x-3">
+                        <div className="grid grid-cols-3 gap-x-3">
                             <ReadField
                                 label="Location"
                                 value={d.location ? (
@@ -561,6 +561,15 @@ export default function ReportDetailPage() {
                                     <span className="flex items-center gap-1">
                                         <Building2 className="w-3 h-3 text-slate-400 shrink-0" />
                                         {d.department.name}
+                                    </span>
+                                ) : undefined}
+                            />
+                            <ReadField
+                                label="Risk Level"
+                                value={d.risk_level_origin ? (
+                                    <span className="flex items-center gap-1">
+                                        <AlertTriangle className="w-3 h-3 text-slate-400 shrink-0" />
+                                        {d.risk_level_origin}
                                     </span>
                                 ) : undefined}
                             />
