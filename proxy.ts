@@ -2,9 +2,9 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 
 // Paths that don't need authentication
-const PUBLIC_PATHS = ["/login", "/report"];
+const PUBLIC_PATHS = ["/login", "/report", "/declare"];
 
-export function middleware(request: NextRequest) {
+export default function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
   // Always allow public paths
