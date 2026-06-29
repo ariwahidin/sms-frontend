@@ -321,8 +321,8 @@ function DeclareForm() {
 
     useEffect(() => {
         Promise.all([
-            api.get<Location[]>("/locations").catch(() => ({ data: [] as Location[] })),
-            api.get<Department[]>("/departments").catch(() => ({ data: [] as Department[] })),
+            api.get<Location[]>("/no-auth/locations").catch(() => ({ data: [] as Location[] })),
+            api.get<Department[]>("/no-auth/departments").catch(() => ({ data: [] as Department[] })),
         ]).then(([loc, dept]) => {
             setLocations(loc.data);
             setDepartments(dept.data);
