@@ -24,6 +24,7 @@ import type { Location, Department, RiskLevel } from "@/types/api";
 
 const MAX_FILES = 10;
 const MAX_FILE_SIZE_MB = 10;
+const MAX_COMPRESSED_SIZE_KB = 800; // Ukuran maksimal setelah kompresi
 const ALLOWED_MIME = ["image/jpeg", "image/png", "image/webp"];
 const ALLOWED_LABEL = "JPG, PNG, WEBP";
 const WATERMARK_QUALITY = 0.85;
@@ -140,6 +141,74 @@ async function applyWatermark(file: File, reporterName: string): Promise<File> {
                 "image/jpeg",
                 WATERMARK_QUALITY
             );
+        };
+
+        img.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error("Failed to load image"));
+        };
+
+        img.src = url;
+    });
+}
+
+// ── Image Compression ─────────────────────────────────────────────────────────
+
+async function compressImageToMaxSize(
+    file: File,
+    maxSizeKB: number = MAX_COMPRESSED_SIZE_KB
+): Promise<File> {
+    const maxSizeBytes = maxSizeKB * 1024;
+
+    // Jika sudah di bawah limit, tetap kompres untuk konsistensi format (JPEG)
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        const url = URL.createObjectURL(file);
+
+        img.onload = () => {
+            URL.revokeObjectURL(url);
+
+            const canvas = document.createElement("canvas");
+            canvas.width = img.naturalWidth;
+            canvas.height = img.naturalHeight;
+
+            const ctx = canvas.getContext("2d");
+            if (!ctx) return reject(new Error("Canvas not supported"));
+
+            ctx.drawImage(img, 0, 0);
+
+            // Mulai dengan quality tinggi, turunkan sampai ukuran sesuai
+            let quality = 0.9;
+            const minQuality = 0.3;
+            const maxIterations = 5;
+            let iteration = 0;
+
+            const tryCompress = () => {
+                canvas.toBlob(
+                    (blob) => {
+                        if (!blob) return reject(new Error("Failed to compress image"));
+
+                        // Jika ukuran sudah sesuai atau sudah mencapai quality minimal
+                        if (blob.size <= maxSizeBytes || quality <= minQuality || iteration >= maxIterations) {
+                            const compressed = new File(
+                                [blob],
+                                file.name.replace(/\.[^.]+$/, "") + ".jpg",
+                                { type: "image/jpeg" }
+                            );
+                            resolve(compressed);
+                        } else {
+                            // Turunkan quality dan coba lagi
+                            iteration++;
+                            quality = Math.max(quality - 0.15, minQuality);
+                            tryCompress();
+                        }
+                    },
+                    "image/jpeg",
+                    quality
+                );
+            };
+
+            tryCompress();
         };
 
         img.onerror = () => {
@@ -407,37 +476,44 @@ function DeclareForm() {
             }
         }
 
-        if (fromCamera) {
-            setProcessingCamera(true);
-            try {
-                const newEntries: FileEntry[] = [];
-                for (const f of toAdd) {
-                    const wm = await applyWatermark(f, form.reporter_name);
-                    newEntries.push({
-                        file: wm,
-                        preview: URL.createObjectURL(wm),
-                        watermarked: true,
-                    });
-                }
-                setEntries((prev) => [...prev, ...newEntries]);
-            } catch {
-                setFileError("Gagal memproses foto dari kamera. Coba lagi.");
-            } finally {
-                setProcessingCamera(false);
-            }
-        } else {
+        // Proses foto (watermark untuk kamera, kompresi untuk semua)
+        setProcessingCamera(true);
+        try {
             const newEntries: FileEntry[] = [];
+
             for (const f of toAdd) {
-                const dup = entries.some((e) => e.file.name === f.name && e.file.size === f.size);
-                if (!dup) {
-                    newEntries.push({
-                        file: f,
-                        preview: URL.createObjectURL(f),
-                        watermarked: false,
-                    });
+                let processed: File;
+
+                if (fromCamera) {
+                    // Foto dari kamera: watermark dulu, lalu kompres
+                    const wm = await applyWatermark(f, form.reporter_name);
+                    processed = await compressImageToMaxSize(wm);
+                } else {
+                    // Foto dari galeri: langsung kompres
+                    // Cek duplikat berdasarkan nama dan ukuran asli
+                    const dup = entries.some((e) => e.file.name === f.name && e.file.size === f.size);
+                    if (dup) continue;
+
+                    processed = await compressImageToMaxSize(f);
                 }
+
+                newEntries.push({
+                    file: processed,
+                    preview: URL.createObjectURL(processed),
+                    watermarked: fromCamera,
+                });
             }
+
             setEntries((prev) => [...prev, ...newEntries]);
+        } catch (err) {
+            console.error("Error processing image:", err);
+            setFileError(
+                fromCamera
+                    ? "Gagal memproses foto dari kamera. Coba lagi."
+                    : "Gagal memproses foto dari galeri. Coba lagi."
+            );
+        } finally {
+            setProcessingCamera(false);
         }
     };
 
@@ -755,8 +831,14 @@ function DeclareForm() {
                                 disabled={processingCamera}
                                 className="flex flex-col items-center gap-1.5 border-2 border-dashed border-slate-200 rounded-xl py-3 hover:border-slate-300 hover:bg-slate-50 transition-colors disabled:opacity-50"
                             >
-                                <ImagePlus className="w-4 h-4 text-slate-400" />
-                                <span className="text-[11px] text-slate-500 font-medium">Pilih Galeri</span>
+                                {processingCamera ? (
+                                    <Loader2 className="w-4 h-4 text-slate-400 animate-spin" />
+                                ) : (
+                                    <ImagePlus className="w-4 h-4 text-slate-400" />
+                                )}
+                                <span className="text-[11px] text-slate-500 font-medium">
+                                    {processingCamera ? "Memproses..." : "Pilih Galeri"}
+                                </span>
                             </button>
                         </div>
                     )}
@@ -764,7 +846,7 @@ function DeclareForm() {
                     <p className="text-[10px] text-slate-300 mt-1.5 text-center">
                         {!canAddMore
                             ? `Batas ${MAX_FILES} foto tercapai`
-                            : `${entries.length}/${MAX_FILES} foto · maks ${MAX_FILE_SIZE_MB}MB · ${ALLOWED_LABEL}`}
+                            : `${entries.length}/${MAX_FILES} foto · otomatis dikompres maks ${MAX_COMPRESSED_SIZE_KB}KB · ${ALLOWED_LABEL}`}
                     </p>
 
                     {fileError && <p className="text-xs text-red-500 mt-1.5 px-1">{fileError}</p>}
