@@ -308,7 +308,7 @@ function LocationFormModal({
 
                 {isEdit ? (
                     <p className="text-[10px] text-slate-400 mt-3 font-mono break-all">
-                        QR token tidak berubah: {location.qr_token}
+                        QR Code : {location.qr_token}
                     </p>
                 ) : (
                     <p className="text-[10px] text-slate-400 mt-3">

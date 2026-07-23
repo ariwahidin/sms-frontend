@@ -100,11 +100,11 @@ export default function LoginContent() {
         </div>
 
         {/* facility tag, hidden on small screens to keep header compact */}
-        {FACILITY_NAME && (
+        {/* {FACILITY_NAME && (
           <p className="hidden font-mono text-xs tracking-[0.3em] text-slate-300 sm:block">
             {FACILITY_NAME}
           </p>
-        )}
+        )} */}
       </header>
 
       {/* ── Login card, vertically centered over the photo ────────────────── */}
