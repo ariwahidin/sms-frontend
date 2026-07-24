@@ -24,7 +24,26 @@ import type { RiskReport, ReportFile, ReportStatus } from "@/types/api";
 import { cn, formatDate, STATUS_LABEL, STATUS_COLOR, RISK_LABEL, RISK_COLOR } from "@/lib/utils";
 import { useAuthStore } from "@/store/authStore";
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+
+interface ClassifyBody {
+    risk_level: string;
+    priority: string;
+    notes: string;
+    pic_id?: number;
+}
+interface InvestigateBody {
+    root_cause: string;
+    countermeasures: string;
+}
+interface ApproveRejectBody {
+    comment: string;
+}
+
 // ── Stepper config ────────────────────────────────────────────────────────────
+// urutan & label mengikuti SOP: Khai báo → Xác nhận → Nguyên nhân & giải pháp →
+// Chờ phê duyệt → Đóng (versi EN: Declaration → Classification → Investigation
+// → Approval → Closed)
 
 const STEPS: { status: ReportStatus; label: string }[] = [
     { status: "declaration", label: "Declaration" },
@@ -34,23 +53,11 @@ const STEPS: { status: ReportStatus; label: string }[] = [
     { status: "closed", label: "Closed" },
 ];
 
-// ── Grouping files by step (via file.activity.to_status) ──────────────────────
-
-const STEP_ORDER: ReportStatus[] = ["closed",  "approval", "investigation", "classification", "declaration"];
-
-function groupFilesByStep(files: ReportFile[]): { step: ReportStatus; files: ReportFile[] }[] {
-    const groups = new Map<ReportStatus, ReportFile[]>();
-    for (const f of files) {
-        const step = f.activity?.to_status ?? "declaration";
-        if (!groups.has(step)) groups.set(step, []);
-        groups.get(step)!.push(f);
-    }
-
-    console.log({ groups });
-    return STEP_ORDER.filter((s) => groups.has(s)).map((step) => ({ step, files: groups.get(step)! }));
-}
-
 function stepIndex(status: ReportStatus): number {
+    // "approval" di backend sebenarnya direpresentasikan sebagai status
+    // "investigation" yang menunggu HOD (lihat report_service.go — tidak ada
+    // status approval terpisah, approval row di stepper ini menandai
+    // "investigation selesai, menunggu keputusan HOD"). Closed = step terakhir.
     const order: ReportStatus[] = ["declaration", "classification", "investigation", "approval", "closed"];
     const idx = order.indexOf(status);
     return idx === -1 ? 0 : idx;
@@ -90,8 +97,8 @@ function Stepper({ status }: { status: ReportStatus }) {
                                     done
                                         ? "bg-emerald-500 text-white"
                                         : active
-                                            ? "bg-slate-800 text-white ring-4 ring-slate-200"
-                                            : "bg-slate-100 text-slate-400"
+                                        ? "bg-slate-800 text-white ring-4 ring-slate-200"
+                                        : "bg-slate-100 text-slate-400"
                                 )}
                             >
                                 {done ? <Check className="w-3.5 h-3.5" /> : i + 1}
@@ -135,8 +142,8 @@ function SLABadge({ deadline, label }: { deadline?: string | null; label: string
                 overdue
                     ? "text-red-600 bg-red-50 border-red-200"
                     : hours < 2
-                        ? "text-amber-600 bg-amber-50 border-amber-200"
-                        : "text-slate-500 bg-slate-50 border-slate-200"
+                    ? "text-amber-600 bg-amber-50 border-amber-200"
+                    : "text-slate-500 bg-slate-50 border-slate-200"
             )}
         >
             <Clock className="w-3 h-3 shrink-0" />
@@ -199,62 +206,9 @@ function TextAreaField({
     );
 }
 
-// ── File Selector (attach files ke sebuah form, submit bareng saat action) ─────
-
-function FileSelector({ files, onChange }: { files: File[]; onChange: (files: File[]) => void }) {
-    return (
-        <div className="mb-3 last:mb-0">
-            <label className="text-[10px] text-slate-400 mb-1 block">Attachments (optional)</label>
-            <label className="flex items-center justify-center gap-2 p-2.5 rounded-lg border-2 border-dashed border-slate-200 cursor-pointer hover:border-slate-400 hover:bg-slate-50 transition-colors">
-                <Upload className="w-3.5 h-3.5 text-slate-400" />
-                <span className="text-[11px] text-slate-400">
-                    {files.length > 0 ? `${files.length} file(s) selected` : "Attach photo or document"}
-                </span>
-                <input
-                    type="file"
-                    multiple
-                    className="hidden"
-                    onChange={(e) => {
-                        if (e.target.files) onChange(Array.from(e.target.files));
-                    }}
-                />
-            </label>
-            {files.length > 0 && (
-                <div className="flex flex-wrap gap-1.5 mt-2">
-                    {files.map((f, i) => (
-                        <span
-                            key={`${f.name}-${i}`}
-                            className="flex items-center gap-1 text-[10px] text-slate-500 bg-slate-50 border border-slate-200 rounded-full px-2 py-0.5"
-                        >
-                            {f.name}
-                            <button
-                                type="button"
-                                onClick={() => onChange(files.filter((_, idx) => idx !== i))}
-                                className="text-slate-400 hover:text-slate-600"
-                            >
-                                <X className="w-2.5 h-2.5" />
-                            </button>
-                        </span>
-                    ))}
-                </div>
-            )}
-        </div>
-    );
-}
-
 // ── Image Lightbox ────────────────────────────────────────────────────────────
 
-function Lightbox({
-    src,
-    name,
-    activity,
-    onClose,
-}: {
-    src: string;
-    name: string;
-    activity?: ReportFile["activity"];
-    onClose: () => void;
-}) {
+function Lightbox({ src, name, onClose }: { src: string; name: string; onClose: () => void }) {
     useEffect(() => {
         const handler = (e: KeyboardEvent) => {
             if (e.key === "Escape") onClose();
@@ -291,22 +245,9 @@ function Lightbox({
             <img
                 src={src}
                 alt={name}
-                className="max-w-[90vw] max-h-[75vh] object-contain rounded-lg shadow-2xl"
+                className="max-w-[90vw] max-h-[85vh] object-contain rounded-lg shadow-2xl"
                 onClick={(e) => e.stopPropagation()}
             />
-            {activity && (
-                <div
-                    className="absolute bottom-0 left-0 right-0 bg-black/50 px-4 py-3"
-                    onClick={(e) => e.stopPropagation()}
-                >
-                    <p className="text-xs text-white/90 capitalize">{activity.action.replace("_", " ")}</p>
-                    {activity.notes && <p className="text-[11px] text-white/60 mt-0.5">{activity.notes}</p>}
-                    <p className="text-[10px] text-white/40 mt-1">
-                        {activity.by_user_name && `${activity.by_user_name} · `}
-                        {formatDate(activity.created_at)}
-                    </p>
-                </div>
-            )}
         </div>
     );
 }
@@ -355,63 +296,60 @@ function FileCard({ file, reportId }: { file: ReportFile; reportId: number }) {
         }
     };
 
-    const activity = file.activity;
-
-    if (isImage) {
-        // ── Compact thumbnail mode (grid 3 kolom, aspect-square) ───────────────
-        return (
-            <>
-                <button
-                    onClick={() => objectUrl && setLightbox(true)}
-                    className="relative aspect-square rounded-lg bg-slate-100 overflow-hidden group border border-slate-100 hover:border-slate-300 transition-colors"
-                    disabled={imgLoading || !objectUrl}
-                    title={file.file_name}
-                >
-                    {imgLoading && (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                            <Loader2 className="w-3.5 h-3.5 animate-spin text-slate-300" />
-                        </div>
-                    )}
-                    {objectUrl && (
-                        <>
-                            <img src={objectUrl} alt={file.file_name} className="w-full h-full object-cover" />
-                            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-colors flex items-center justify-center">
-                                <ZoomIn className="w-4 h-4 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" />
-                            </div>
-                        </>
-                    )}
-                    {!imgLoading && !objectUrl && (
-                        <div className="absolute inset-0 flex items-center justify-center">
-                            <ImageIcon className="w-4 h-4 text-slate-300" />
-                        </div>
-                    )}
-                </button>
-
-                {lightbox && objectUrl && (
-                    <Lightbox src={objectUrl} name={file.file_name} activity={activity} onClose={() => setLightbox(false)} />
-                )}
-            </>
-        );
-    }
-
-    // ── Compact row mode untuk dokumen non-gambar ──────────────────────────────
     return (
-        <div className="flex items-center gap-2 px-2 py-1.5 rounded-lg border border-slate-100 hover:border-slate-200 bg-white transition-colors">
-            <div className="w-6 h-6 rounded-md bg-slate-100 flex items-center justify-center shrink-0">
-                <ImageIcon className="w-3 h-3 text-slate-400" />
+        <>
+            <div className="rounded-xl border border-slate-100 overflow-hidden bg-white hover:border-slate-200 transition-colors">
+                {isImage && (
+                    <button
+                        onClick={() => objectUrl && setLightbox(true)}
+                        className="relative w-full aspect-video bg-slate-100 overflow-hidden group"
+                        disabled={imgLoading || !objectUrl}
+                    >
+                        {imgLoading && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <Loader2 className="w-4 h-4 animate-spin text-slate-300" />
+                            </div>
+                        )}
+                        {objectUrl && (
+                            <>
+                                <img src={objectUrl} alt={file.file_name} className="w-full h-full object-cover" />
+                                <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors flex items-center justify-center">
+                                    <ZoomIn className="w-5 h-5 text-white opacity-0 group-hover:opacity-100 transition-opacity drop-shadow" />
+                                </div>
+                            </>
+                        )}
+                        {!imgLoading && !objectUrl && (
+                            <div className="absolute inset-0 flex items-center justify-center">
+                                <ImageIcon className="w-5 h-5 text-slate-300" />
+                            </div>
+                        )}
+                    </button>
+                )}
+
+                <div className="flex items-center gap-2.5 px-3 py-2">
+                    {!isImage && (
+                        <div className="w-7 h-7 rounded-md bg-slate-100 flex items-center justify-center shrink-0">
+                            <ImageIcon className="w-3.5 h-3.5 text-slate-400" />
+                        </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                        <p className="text-xs text-slate-700 truncate">{file.file_name}</p>
+                        <p className="text-[10px] text-slate-400">{formatFileSize(file.file_size)}</p>
+                    </div>
+                    <button
+                        onClick={handleDownload}
+                        className="w-6 h-6 flex items-center justify-center rounded-md hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0"
+                        title="Download"
+                    >
+                        <Download className="w-3.5 h-3.5" />
+                    </button>
+                </div>
             </div>
-            <div className="flex-1 min-w-0">
-                <p className="text-[11px] text-slate-700 truncate">{file.file_name}</p>
-                <p className="text-[9px] text-slate-400">{formatFileSize(file.file_size)}</p>
-            </div>
-            <button
-                onClick={handleDownload}
-                className="w-5 h-5 flex items-center justify-center rounded hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors shrink-0"
-                title="Download"
-            >
-                <Download className="w-3 h-3" />
-            </button>
-        </div>
+
+            {lightbox && objectUrl && (
+                <Lightbox src={objectUrl} name={file.file_name} onClose={() => setLightbox(false)} />
+            )}
+        </>
     );
 }
 
@@ -429,18 +367,12 @@ export default function ReportDetailPage() {
 
     const [actionLoading, setActionLoading] = useState(false);
     const [actionError, setActionError] = useState<string | null>(null);
-
-    // fallback uploader (hanya tampil kalau tidak ada action form yang bisa dipakai)
     const [uploadLoading, setUploadLoading] = useState(false);
 
+    // form state untuk tiap aksi — diisi inline di kolom yang sesuai
     const [classifyForm, setClassifyForm] = useState({ risk_level: "low", priority: "low", notes: "" });
     const [investigateForm, setInvestigateForm] = useState({ root_cause: "", countermeasures: "" });
     const [hodComment, setHodComment] = useState("");
-
-    // file yang dipilih per form — disatukan dengan submit action masing-masing
-    const [classifyFiles, setClassifyFiles] = useState<File[]>([]);
-    const [investigateFiles, setInvestigateFiles] = useState<File[]>([]);
-    const [hodFiles, setHodFiles] = useState<File[]>([]);
 
     const fetchDetail = () => {
         setLoading(true);
@@ -468,13 +400,14 @@ export default function ReportDetailPage() {
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reportId]);
 
-    const runAction = async (fn: () => Promise<unknown>, onSuccess?: () => void) => {
+    const runAction = async (
+        fn: () => Promise<unknown>,
+    ) => {
         setActionLoading(true);
         setActionError(null);
         try {
             await fn();
             fetchDetail();
-            onSuccess?.();
         } catch (err: any) {
             setActionError(err?.response?.data?.error ?? "Something went wrong");
         } finally {
@@ -482,67 +415,24 @@ export default function ReportDetailPage() {
         }
     };
 
-    const submitClassify = () => {
-        const formData = new FormData();
-        formData.append("risk_level", classifyForm.risk_level);
-        formData.append("priority", classifyForm.priority);
-        formData.append("notes", classifyForm.notes);
-        classifyFiles.forEach((f) => formData.append("files", f));
-        return runAction(
-            () =>
-                api.patch(`/reports/${reportId}/classify`, formData, {
-                    headers: { "Content-Type": "multipart/form-data" },
-                }),
-            () => setClassifyFiles([])
-        );
-    };
+    const submitClassify = () =>
+        runAction(() => api.patch(`/reports/${reportId}/classify`, classifyForm as ClassifyBody));
 
-    const submitInvestigate = () => {
-        const formData = new FormData();
-        formData.append("root_cause", investigateForm.root_cause);
-        formData.append("countermeasures", investigateForm.countermeasures);
-        investigateFiles.forEach((f) => formData.append("files", f));
-        return runAction(
-            () =>
-                api.patch(`/reports/${reportId}/investigate`, formData, {
-                    headers: { "Content-Type": "multipart/form-data" },
-                }),
-            () => setInvestigateFiles([])
-        );
-    };
+    const submitInvestigate = () =>
+        runAction(() => api.patch(`/reports/${reportId}/investigate`, investigateForm as InvestigateBody));
 
-    const submitApprove = () => {
-        const formData = new FormData();
-        formData.append("comment", hodComment);
-        hodFiles.forEach((f) => formData.append("files", f));
-        return runAction(
-            () =>
-                api.post(`/reports/${reportId}/approve`, formData, {
-                    headers: { "Content-Type": "multipart/form-data" },
-                }),
-            () => setHodFiles([])
-        );
-    };
+    const submitApprove = () =>
+        runAction(() => api.post(`/reports/${reportId}/approve`, { comment: hodComment } as ApproveRejectBody));
 
     const submitReject = () => {
         if (!hodComment.trim()) {
             setActionError("Rejection reason (comment) is required");
             return;
         }
-        const formData = new FormData();
-        formData.append("comment", hodComment);
-        hodFiles.forEach((f) => formData.append("files", f));
-        return runAction(
-            () =>
-                api.post(`/reports/${reportId}/reject`, formData, {
-                    headers: { "Content-Type": "multipart/form-data" },
-                }),
-            () => setHodFiles([])
-        );
+        return runAction(() => api.post(`/reports/${reportId}/reject`, { comment: hodComment } as ApproveRejectBody));
     };
 
-    // fallback: dipakai hanya kalau user tidak sedang punya action form apapun
-    const handleFallbackUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         if (!e.target.files?.[0]) return;
         const file = e.target.files[0];
         const formData = new FormData();
@@ -589,20 +479,17 @@ export default function ReportDetailPage() {
     const canClassify =
         d.status === "declaration" && (user?.role === "pic" || user?.role === "admin");
     const canInvestigate =
-        (d.status === "classification" || d.status === "investigation" || d.status === "approval") &&
+        (d.status === "classification" || d.status === "investigation") &&
         (user?.role === "pic" || user?.role === "admin");
     const canApproveReject =
         d.status === "investigation" && (user?.role === "hod" || user?.role === "admin");
-
-    // kalau tidak ada satupun action form tersedia, tampilkan fallback uploader
-    const noActiveForm = !canClassify && !canInvestigate && !canApproveReject;
 
     const imageFiles = d.files?.filter((f) => isImageMime(f.mime_type)) ?? [];
     const otherFiles = d.files?.filter((f) => !isImageMime(f.mime_type)) ?? [];
 
     return (
         <div className="px-6 py-5 max-w-[1400px] mx-auto">
-            {/* ── Header ───────────────────────────────────────────────────────── */}
+            {/* ── Header: code, badges, back button ───────────────────────────── */}
             <div className="flex items-start justify-between mb-4 gap-3">
                 <div className="min-w-0">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -642,6 +529,7 @@ export default function ReportDetailPage() {
                 </button>
             </div>
 
+            {/* ── Stepper ──────────────────────────────────────────────────────── */}
             <div className="bg-white border border-slate-200 rounded-xl px-5 py-4 mb-5">
                 <Stepper status={d.status} />
             </div>
@@ -652,8 +540,9 @@ export default function ReportDetailPage() {
                 </div>
             )}
 
+            {/* ── 3-column grid ────────────────────────────────────────────────── */}
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-                {/* ── Kolom kiri ───────────────────────────────────────────────── */}
+                {/* ── Kolom kiri: lokasi, dept, deskripsi ────────────────────────── */}
                 <div className="space-y-4">
                     <ColumnCard title="Detection">
                         <div className="grid grid-cols-3 gap-x-3">
@@ -698,6 +587,7 @@ export default function ReportDetailPage() {
                         <ReadField label="Reported at" value={formatDate(d.created_at)} />
                     </ColumnCard>
 
+                    {/* PIC notes — read-only kalau sudah ada, atau bagian dari form classify */}
                     {d.pic && (
                         <ColumnCard title="PIC">
                             <ReadField
@@ -714,7 +604,7 @@ export default function ReportDetailPage() {
                     )}
                 </div>
 
-                {/* ── Kolom tengah ─────────────────────────────────────────────── */}
+                {/* ── Kolom tengah: causes & countermeasures / classify form ───────── */}
                 <div className="space-y-4">
                     {canClassify ? (
                         <ColumnCard title="Classify & Confirm">
@@ -750,11 +640,10 @@ export default function ReportDetailPage() {
                                 onChange={(v) => setClassifyForm((p) => ({ ...p, notes: v }))}
                                 placeholder="Classification notes..."
                             />
-                            <FileSelector files={classifyFiles} onChange={setClassifyFiles} />
                             <button
                                 onClick={submitClassify}
                                 disabled={actionLoading}
-                                className="w-full mt-1 text-xs py-2 px-3 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-1.5"
+                                className="w-full mt-3 text-xs py-2 px-3 rounded-lg bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-60 flex items-center justify-center gap-1.5"
                             >
                                 {actionLoading && <Loader2 className="w-3 h-3 animate-spin" />}
                                 Confirm Classification
@@ -772,7 +661,7 @@ export default function ReportDetailPage() {
                     {canInvestigate ? (
                         <ColumnCard title="Causes & Countermeasures">
                             <TextAreaField
-                                label="Cause"
+                                label="Root Cause"
                                 required
                                 value={investigateForm.root_cause}
                                 onChange={(v) => setInvestigateForm((p) => ({ ...p, root_cause: v }))}
@@ -785,7 +674,6 @@ export default function ReportDetailPage() {
                                 onChange={(v) => setInvestigateForm((p) => ({ ...p, countermeasures: v }))}
                                 placeholder="Actions taken or planned..."
                             />
-                            <FileSelector files={investigateFiles} onChange={setInvestigateFiles} />
                             <button
                                 onClick={submitInvestigate}
                                 disabled={actionLoading}
@@ -817,8 +705,7 @@ export default function ReportDetailPage() {
                                 onChange={setHodComment}
                                 placeholder="Required if rejecting, optional if approving..."
                             />
-                            <FileSelector files={hodFiles} onChange={setHodFiles} />
-                            <div className="flex gap-2 mt-1">
+                            <div className="flex gap-2 mt-3">
                                 <button
                                     onClick={submitApprove}
                                     disabled={actionLoading}
@@ -851,7 +738,7 @@ export default function ReportDetailPage() {
                     )}
                 </div>
 
-                {/* ── Kolom kanan ──────────────────────────────────────────────── */}
+                {/* ── Kolom kanan: SLA timeline + files ─────────────────────────── */}
                 <div className="space-y-4">
                     {(d.sla_deadline_classification || d.sla_deadline_investigation || d.sla_deadline_approval) && (
                         <ColumnCard title="SLA Timeline">
@@ -868,100 +755,75 @@ export default function ReportDetailPage() {
                             <p className="text-xs text-slate-400 text-center py-6">No files attached yet</p>
                         ) : (
                             <div className="space-y-4 mb-3">
-                                {groupFilesByStep(d.files).map(({ step, files }) => {
-                                    const stepImages = files.filter((f) => isImageMime(f.mime_type));
-                                    const stepDocs = files.filter((f) => !isImageMime(f.mime_type));
-                                    return (
-                                        <div key={step}>
-                                            <p className="text-[10px] font-medium text-slate-500 mb-1.5 flex items-center gap-1.5">
-                                                <span className="w-1.5 h-1.5 rounded-full bg-slate-300" />
-                                                {STATUS_LABEL[step]}
-                                                <span className="text-slate-300">· {files.length}</span>
-                                            </p>
-                                            {stepImages.length > 0 && (
-                                                <div className="grid grid-cols-3 gap-1.5 mb-1.5">
-                                                    {stepImages.map((f) => (
-                                                        <FileCard key={f.id} file={f} reportId={d.id} />
-                                                    ))}
-                                                </div>
-                                            )}
-                                            {stepDocs.length > 0 && (
-                                                <div className="space-y-1">
-                                                    {stepDocs.map((f) => (
-                                                        <FileCard key={f.id} file={f} reportId={d.id} />
-                                                    ))}
-                                                </div>
-                                            )}
+                                {imageFiles.length > 0 && (
+                                    <div>
+                                        <p className="text-[10px] text-slate-400 mb-2">Photos ({imageFiles.length})</p>
+                                        <div className="grid grid-cols-2 gap-2">
+                                            {imageFiles.map((f) => (
+                                                <FileCard key={f.id} file={f} reportId={d.id} />
+                                            ))}
                                         </div>
-                                    );
-                                })}
+                                    </div>
+                                )}
+                                {otherFiles.length > 0 && (
+                                    <div>
+                                        <p className="text-[10px] text-slate-400 mb-2">Documents ({otherFiles.length})</p>
+                                        <div className="space-y-2">
+                                            {otherFiles.map((f) => (
+                                                <FileCard key={f.id} file={f} reportId={d.id} />
+                                            ))}
+                                        </div>
+                                    </div>
+                                )}
                             </div>
                         )}
 
-                        {noActiveForm && (
-                            <label
-                                className={cn(
-                                    "flex items-center justify-center gap-2 p-3 rounded-lg border-2 border-dashed border-slate-200 cursor-pointer hover:border-slate-400 hover:bg-slate-50 transition-colors",
-                                    uploadLoading && "opacity-50 pointer-events-none"
-                                )}
-                            >
-                                {uploadLoading ? (
-                                    <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
-                                ) : (
-                                    <Upload className="w-4 h-4 text-slate-400" />
-                                )}
-                                <span className="text-xs text-slate-400">
-                                    {uploadLoading ? "Uploading..." : "Upload file"}
-                                </span>
-                                <input type="file" className="hidden" onChange={handleFallbackUpload} />
-                            </label>
-                        )}
+                        <label
+                            className={cn(
+                                "flex items-center justify-center gap-2 p-3 rounded-lg border-2 border-dashed border-slate-200 cursor-pointer hover:border-slate-400 hover:bg-slate-50 transition-colors",
+                                uploadLoading && "opacity-50 pointer-events-none"
+                            )}
+                        >
+                            {uploadLoading ? (
+                                <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+                            ) : (
+                                <Upload className="w-4 h-4 text-slate-400" />
+                            )}
+                            <span className="text-xs text-slate-400">
+                                {uploadLoading ? "Uploading..." : "Upload file"}
+                            </span>
+                            <input type="file" className="hidden" onChange={handleUpload} />
+                        </label>
                     </ColumnCard>
 
+                    {/* Activity log */}
                     {d.activities && d.activities.length > 0 && (
                         <ColumnCard title="Activity Log">
                             <div className="relative">
                                 <div className="absolute left-[7px] top-0 bottom-0 w-px bg-slate-100" />
                                 <div className="space-y-4">
-                                    {[...d.activities].reverse().map((act) => {
-                                        const isUpload = act.action === "upload_file";
-                                        const showTransition =
-                                            act.from_status && act.to_status && act.from_status !== act.to_status;
-                                        return (
-                                            <div key={act.id} className="flex gap-3 relative">
-                                                <div
-                                                    className={cn(
-                                                        "w-3.5 h-3.5 rounded-full border-2 border-white shrink-0 mt-0.5 z-10",
-                                                        isUpload ? "bg-sky-300" : "bg-slate-200"
-                                                    )}
-                                                />
-                                                <div className="flex-1 min-w-0">
-                                                    <p className="text-xs font-medium text-slate-700 capitalize">
-                                                        {isUpload ? "File uploaded" : act.action}
-                                                    </p>
-                                                    {showTransition && (
-                                                        <div className="flex items-center gap-1 mt-0.5">
-                                                            <span className="text-[10px] text-slate-400">{STATUS_LABEL[act.from_status ?? "declaration"]}</span>
-                                                            <ChevronRight className="w-2.5 h-2.5 text-slate-300" />
-                                                            <span className="text-[10px] text-slate-600">{STATUS_LABEL[act.to_status ?? "declaration"]}</span>
-                                                        </div>
-                                                    )}
-                                                    {!showTransition && act.to_status && (
-                                                        <span className="text-[10px] text-slate-400">
-                                                            during {STATUS_LABEL[act.to_status]}
-                                                        </span>
-                                                    )}
-                                                    {act.notes && (
-                                                        <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">{act.notes}</p>
-                                                    )}
-                                                    <p className="text-[10px] text-slate-400 mt-1">
-                                                        {act.by_user_name && `${act.by_user_name} · `}
-                                                        {formatDate(act.created_at)}
-                                                    </p>
-                                                </div>
+                                    {[...d.activities].reverse().map((act) => (
+                                        <div key={act.id} className="flex gap-3 relative">
+                                            <div className="w-3.5 h-3.5 rounded-full bg-slate-200 border-2 border-white shrink-0 mt-0.5 z-10" />
+                                            <div className="flex-1 min-w-0">
+                                                <p className="text-xs font-medium text-slate-700 capitalize">{act.action}</p>
+                                                {act.from_status && act.to_status && (
+                                                    <div className="flex items-center gap-1 mt-0.5">
+                                                        <span className="text-[10px] text-slate-400">{STATUS_LABEL[act.from_status]}</span>
+                                                        <ChevronRight className="w-2.5 h-2.5 text-slate-300" />
+                                                        <span className="text-[10px] text-slate-600">{STATUS_LABEL[act.to_status]}</span>
+                                                    </div>
+                                                )}
+                                                {act.notes && (
+                                                    <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">{act.notes}</p>
+                                                )}
+                                                <p className="text-[10px] text-slate-400 mt-1">
+                                                    {act.by_user_name && `${act.by_user_name} · `}
+                                                    {formatDate(act.created_at)}
+                                                </p>
                                             </div>
-                                        );
-                                    })}
+                                        </div>
+                                    ))}
                                 </div>
                             </div>
                         </ColumnCard>

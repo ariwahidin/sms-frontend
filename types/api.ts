@@ -49,26 +49,39 @@ export interface Location {
 }
 
 export interface ReportActivity {
-  id: number;
-  report_id: number;
-  action: string;
-  from_status: ReportStatus;
-  to_status: ReportStatus;
-  notes: string;
-  by_user_id?: number;
-  by_user_name: string;
-  created_at: string;
+    id: number;
+    report_id: number;
+    action: string;
+    from_status?: ReportStatus;
+    to_status?: ReportStatus;
+    notes?: string;
+    by_user_id?: number;
+    by_user_name?: string;
+    created_at: string;
 }
 
+// export interface ReportFile {
+//   id: number;
+//   report_id: number;
+//   file_name: string;
+//   file_path: string;
+//   file_size: number;
+//   mime_type: string;
+//   uploaded_by?: number;
+//   created_at: string;
+// }
+
 export interface ReportFile {
-  id: number;
-  report_id: number;
-  file_name: string;
-  file_path: string;
-  file_size: number;
-  mime_type: string;
-  uploaded_by?: number;
-  created_at: string;
+    id: number;
+    report_id: number;
+    activity_id?: number;
+    activity?: ReportActivity; // baru — relasi penuh ke activity
+    file_name: string;
+    file_path: string;
+    file_size: number;
+    mime_type: string;
+    uploaded_by?: number;
+    created_at: string;
 }
 
 export interface RiskReport {
