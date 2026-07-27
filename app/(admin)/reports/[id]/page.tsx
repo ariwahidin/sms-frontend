@@ -20,7 +20,7 @@ import {
     ChevronRight,
 } from "lucide-react";
 import api from "@/lib/api";
-import type { RiskReport, ReportFile, ReportStatus } from "@/types/api";
+import type { RiskReport, ReportFile, ReportStatus, ReportData, Recipient } from "@/types/api";
 import { cn, formatDate, STATUS_LABEL, STATUS_COLOR, RISK_LABEL, RISK_COLOR } from "@/lib/utils";
 import { useAuthStore } from "@/store/authStore";
 
@@ -36,7 +36,7 @@ const STEPS: { status: ReportStatus; label: string }[] = [
 
 // ── Grouping files by step (via file.activity.to_status) ──────────────────────
 
-const STEP_ORDER: ReportStatus[] = ["closed",  "approval", "investigation", "classification", "declaration"];
+const STEP_ORDER: ReportStatus[] = ["closed", "approval", "investigation", "classification", "declaration"];
 
 function groupFilesByStep(files: ReportFile[]): { step: ReportStatus; files: ReportFile[] }[] {
     const groups = new Map<ReportStatus, ReportFile[]>();
@@ -424,6 +424,7 @@ export default function ReportDetailPage() {
     const user = useAuthStore((s) => s.user);
 
     const [detail, setDetail] = useState<RiskReport | null>(null);
+    const [recipients, setRecipients] = useState<Recipient[]>([]);
     const [loading, setLoading] = useState(true);
     const [notFound, setNotFound] = useState(false);
 
@@ -445,17 +446,18 @@ export default function ReportDetailPage() {
     const fetchDetail = () => {
         setLoading(true);
         api
-            .get<RiskReport>(`/reports/${reportId}`)
+            .get<ReportData>(`/reports/${reportId}`)
             .then((res) => {
-                setDetail(res.data);
+                setDetail(res.data.report);
+                setRecipients(res.data.recipients ?? []);
                 setClassifyForm({
-                    risk_level: res.data.risk_level || "low",
-                    priority: res.data.priority || "low",
-                    notes: res.data.pic_notes || "",
+                    risk_level: res.data.report.risk_level || "low",
+                    priority: res.data.report.priority || "low",
+                    notes: res.data.report.pic_notes || "",
                 });
                 setInvestigateForm({
-                    root_cause: res.data.root_cause || "",
-                    countermeasures: res.data.countermeasures || "",
+                    root_cause: res.data.report.root_cause || "",
+                    countermeasures: res.data.report.countermeasures || "",
                 });
             })
             .catch(() => setNotFound(true))
@@ -597,9 +599,6 @@ export default function ReportDetailPage() {
     // kalau tidak ada satupun action form tersedia, tampilkan fallback uploader
     const noActiveForm = !canClassify && !canInvestigate && !canApproveReject;
 
-    const imageFiles = d.files?.filter((f) => isImageMime(f.mime_type)) ?? [];
-    const otherFiles = d.files?.filter((f) => !isImageMime(f.mime_type)) ?? [];
-
     return (
         <div className="px-6 py-5 max-w-[1400px] mx-auto">
             {/* ── Header ───────────────────────────────────────────────────────── */}
@@ -697,6 +696,27 @@ export default function ReportDetailPage() {
                         />
                         <ReadField label="Reported at" value={formatDate(d.created_at)} />
                     </ColumnCard>
+
+                    {recipients.length > 0 && (
+                        <ColumnCard title="Notification Recipients">
+                            <div className="flex flex-col gap-2">
+                                {recipients.map((r) => (
+                                    <div
+                                        key={r.email}
+                                        className="flex items-center justify-between gap-2 text-xs bg-slate-50 border border-slate-100 rounded-lg px-2.5 py-1.5"
+                                    >
+                                        <div className="min-w-0">
+                                            <p className="text-slate-700 truncate">{r.email}</p>
+                                            <p className="text-[10px] text-slate-400">
+                                                {r.role.toUpperCase()}
+                                                {r.department && ` · ${r.department}`}
+                                            </p>
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        </ColumnCard>
+                    )}
 
                     {d.pic && (
                         <ColumnCard title="PIC">

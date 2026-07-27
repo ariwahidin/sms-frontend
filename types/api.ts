@@ -84,6 +84,17 @@ export interface ReportFile {
     created_at: string;
 }
 
+export interface Recipient {
+    name: string;
+    email: string;
+    role: "pic" | "hod";
+    department: string;
+}
+
+export interface ReportData {
+    report: RiskReport;
+    recipients: Recipient[];
+}
 export interface RiskReport {
   id: number;
   code: string;
