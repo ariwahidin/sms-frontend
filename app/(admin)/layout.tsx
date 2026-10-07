@@ -1,9 +1,11 @@
-/* eslint-disable @next/next/no-img-element */
+/* eslint-disable react-hooks/set-state-in-effect */
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, usePathname } from "next/navigation";
+import type { ComponentType, ReactNode } from "react";
+import { usePathname, useRouter } from "next/navigation";
 import Link from "next/link";
+
 import {
   LayoutDashboard,
   FileWarning,
@@ -17,10 +19,15 @@ import {
   Database,
   Menu,
   X,
+  Paperclip,
+  List,
 } from "lucide-react";
+
 import { useAuthStore } from "@/store/authStore";
 import { cn } from "@/lib/utils";
+
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -30,340 +37,799 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 
-const NAV_ITEMS = [
+/* ========================================================================
+   TYPES
+======================================================================== */
+
+type Role = "admin" | "pic" | "hod";
+
+type NavItem = {
+  label: string;
+  href: string;
+  icon: ComponentType<{ className?: string }>;
+  roles: readonly Role[];
+};
+
+type NavGroup = {
+  label: string;
+  icon: ComponentType<{ className?: string }>;
+  roles: readonly Role[];
+  children: readonly NavItem[];
+};
+
+type NavigationItem = NavItem | NavGroup;
+
+/* ========================================================================
+   CONSTANTS
+======================================================================== */
+
+const ROLE_LABEL: Record<Role, string> = {
+  admin: "Administrator",
+  pic: "PIC",
+  hod: "Head of Dept",
+};
+
+const LOGO_SRC = "/branding/yusen_logo.png";
+
+/* ========================================================================
+   NAVIGATION
+======================================================================== */
+
+const NAV_ITEMS: readonly NavigationItem[] = [
   {
     label: "Dashboard",
     href: "/dashboard",
     icon: LayoutDashboard,
     roles: ["admin", "pic", "hod"],
   },
+
   {
     label: "Reports",
-    href: "/reports",
+    // href: "/reports",
     icon: FileWarning,
     roles: ["admin", "pic", "hod"],
+    children: [
+      {
+        label: "List Reports",
+        href: "/reports",
+        icon: List,
+        roles: ["admin", "pic", "hod"],
+      },
+    ],
   },
+
   {
     label: "Master Data",
     icon: Database,
-    roles: ["admin"],
+    roles: ["admin", "pic"],
     children: [
-      { label: "Users", href: "/users", icon: Users, roles: ["admin"] },
-      { label: "Departments", href: "/departments", icon: Building2, roles: ["admin"] },
-      { label: "Locations", href: "/locations", icon: MapPin, roles: ["admin"] },
+      {
+        label: "Users",
+        href: "/users",
+        icon: Users,
+        roles: ["admin"],
+      },
+      {
+        label: "Departments",
+        href: "/departments",
+        icon: Building2,
+        roles: ["admin", "pic"],
+      },
+      {
+        label: "Locations",
+        href: "/locations",
+        icon: MapPin,
+        roles: ["admin", "pic"],
+      },
     ],
   },
-] as const;
+];
 
-const ROLE_LABEL = { admin: "Administrator", pic: "PIC", hod: "Head of Dept" };
+/* ========================================================================
+   TYPE GUARDS
+======================================================================== */
 
-const LOGO_SRC = "/branding/yusen_logo.png";
+function isNavGroup(item: NavigationItem): item is NavGroup {
+  return "children" in item;
+}
+
+/* ========================================================================
+   HELPERS
+======================================================================== */
+
+function getRoleLabel(role?: string): string {
+  if (!role) {
+    return "—";
+  }
+
+  if (role === "admin" || role === "pic" || role === "hod") {
+    return ROLE_LABEL[role];
+  }
+
+  return role;
+}
+
+function isValidRole(role?: string): role is Role {
+  return role === "admin" || role === "pic" || role === "hod";
+}
+
+/* ========================================================================
+   SIDEBAR CONTENT
+======================================================================== */
+
+type SidebarContentProps = {
+  mobile?: boolean;
+  sidebarOpen: boolean;
+  setSidebarOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  masterDataOpen: boolean;
+  setMasterDataOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  filteredNav: readonly NavigationItem[];
+  pathname: string;
+  initials: string;
+  userName?: string;
+  userRole?: string;
+  handleLogout: () => void;
+};
+
+function SidebarContent({
+  mobile = false,
+  sidebarOpen,
+  setSidebarOpen,
+  masterDataOpen,
+  setMasterDataOpen,
+  filteredNav,
+  pathname,
+  initials,
+  userName,
+  userRole,
+  handleLogout,
+}: SidebarContentProps) {
+  const isActive = (href: string): boolean =>
+    pathname === href ||
+    (href !== "/dashboard" && pathname.startsWith(`${href}/`));
+
+  const isGroupActive = (children: readonly NavItem[]): boolean =>
+    children.some((child) => isActive(child.href));
+
+  return (
+    <div className="flex h-full flex-col">
+      {/* ================================================================
+          SIDEBAR HEADER
+      ================================================================ */}
+
+      <div className="flex h-16 shrink-0 items-center border-b border-slate-700/80 px-4">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-10 w-14 shrink-0 items-center justify-center rounded-md bg-slate-800 px-1.5">
+            <img
+              src={LOGO_SRC}
+              alt="Yusen Logistics"
+              className="h-7 w-auto object-contain"
+            />
+          </div>
+
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold text-white">
+              Yusen Logistics
+            </p>
+
+            <p className="truncate text-[10px] font-medium uppercase tracking-wider text-slate-400">
+              Safety Management
+            </p>
+          </div>
+        </div>
+
+        {mobile && (
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            className="ml-auto rounded-md p-1.5 text-slate-400 transition-colors hover:bg-slate-700 hover:text-white"
+            aria-label="Close navigation"
+          >
+            <X className="h-5 w-5" />
+          </button>
+        )}
+      </div>
+
+      {/* ================================================================
+          NAVIGATION
+      ================================================================ */}
+
+      <div className="flex-1 overflow-y-auto px-3 py-5">
+        <div className="mb-2 px-2">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            Main Menu
+          </span>
+        </div>
+
+        <nav className="space-y-1" aria-label="Main navigation">
+          {filteredNav.map((item) => {
+            /* ==========================================================
+               GROUP
+            ========================================================== */
+
+            if (isNavGroup(item)) {
+              if (item.children.length === 0) {
+                return null;
+              }
+
+              const active = isGroupActive(item.children);
+
+              return (
+                <div key={item.label}>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setMasterDataOpen((value) => !value)
+                    }
+                    className={cn(
+                      "group relative flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                      active
+                        ? "bg-sky-500/10 text-white"
+                        : "text-slate-300 hover:bg-slate-700/70 hover:text-white"
+                    )}
+                    aria-expanded={masterDataOpen}
+                  >
+                    <span
+                      className={cn(
+                        "absolute left-0 h-8 w-0.5 rounded-r-full",
+                        active ? "bg-sky-400" : "bg-transparent"
+                      )}
+                    />
+
+                    <item.icon
+                      className={cn(
+                        "h-[18px] w-[18px] shrink-0",
+                        active
+                          ? "text-sky-400"
+                          : "text-slate-400 group-hover:text-slate-200"
+                      )}
+                    />
+
+                    <span className="flex-1 text-left">
+                      {item.label}
+                    </span>
+
+                    <ChevronDown
+                      className={cn(
+                        "h-4 w-4 shrink-0 text-slate-500 transition-transform duration-200",
+                        masterDataOpen && "rotate-180"
+                      )}
+                    />
+                  </button>
+
+                  {masterDataOpen && (
+                    <div className="ml-4 mt-1 space-y-1 border-l border-slate-700 pl-2">
+                      {item.children.map((child) => {
+                        const childActive = isActive(child.href);
+
+                        return (
+                          <Link
+                            key={child.href}
+                            href={child.href}
+                            className={cn(
+                              "group flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-all",
+                              childActive
+                                ? "bg-sky-500/10 font-medium text-white"
+                                : "text-slate-400 hover:bg-slate-700/60 hover:text-slate-200"
+                            )}
+                          >
+                            <child.icon
+                              className={cn(
+                                "h-4 w-4 shrink-0",
+                                childActive
+                                  ? "text-sky-400"
+                                  : "text-slate-500 group-hover:text-slate-300"
+                              )}
+                            />
+
+                            <span className="flex-1">
+                              {child.label}
+                            </span>
+
+                            {childActive && (
+                              <ChevronRight className="h-3.5 w-3.5 text-sky-400" />
+                            )}
+                          </Link>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            }
+
+            /* ==========================================================
+               SIMPLE ITEM
+            ========================================================== */
+
+            const active = isActive(item.href);
+
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className={cn(
+                  "group relative flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-all",
+                  active
+                    ? "bg-sky-500/10 text-white"
+                    : "text-slate-300 hover:bg-slate-700/70 hover:text-white"
+                )}
+              >
+                <span
+                  className={cn(
+                    "absolute left-0 h-8 w-0.5 rounded-r-full",
+                    active ? "bg-sky-400" : "bg-transparent"
+                  )}
+                />
+
+                <item.icon
+                  className={cn(
+                    "h-[18px] w-[18px] shrink-0",
+                    active
+                      ? "text-sky-400"
+                      : "text-slate-400 group-hover:text-slate-200"
+                  )}
+                />
+
+                <span className="flex-1">
+                  {item.label}
+                </span>
+
+                {active && (
+                  <ChevronRight className="h-4 w-4 text-sky-400" />
+                )}
+              </Link>
+            );
+          })}
+        </nav>
+      </div>
+
+      {/* ================================================================
+          SIDEBAR FOOTER / USER
+      ================================================================ */}
+
+      <div className="shrink-0 border-t border-slate-700/80 p-3">
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <button
+              type="button"
+              className="flex w-full items-center gap-3 rounded-lg p-2 text-left transition-colors hover:bg-slate-700/70"
+            >
+              <Avatar className="h-9 w-9 shrink-0">
+                <AvatarFallback className="bg-sky-600 text-xs font-semibold text-white">
+                  {initials}
+                </AvatarFallback>
+              </Avatar>
+
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-medium text-white">
+                  {userName ?? "—"}
+                </p>
+
+                <p className="truncate text-[11px] text-slate-400">
+                  {getRoleLabel(userRole)}
+                </p>
+              </div>
+
+              <ChevronRight className="h-4 w-4 shrink-0 text-slate-500" />
+            </button>
+          </DropdownMenuTrigger>
+
+          <DropdownMenuContent
+            side="top"
+            align="end"
+            className="mb-1 w-56"
+          >
+            <DropdownMenuLabel>
+              <p className="font-medium">{userName ?? "—"}</p>
+
+              <p className="text-xs font-normal text-slate-400">
+                {getRoleLabel(userRole)}
+              </p>
+            </DropdownMenuLabel>
+
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem
+              onClick={handleLogout}
+              className="cursor-pointer text-red-600 focus:bg-red-50 focus:text-red-600"
+            >
+              <LogOut className="mr-2 h-4 w-4" />
+              Sign out
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  );
+}
+
+/* ========================================================================
+   TOP USER MENU
+======================================================================== */
+
+type UserMenuProps = {
+  userName?: string;
+  userRole?: string;
+  initials: string;
+  handleLogout: () => void;
+};
+
+function UserMenu({
+  userName,
+  userRole,
+  initials,
+  handleLogout,
+}: UserMenuProps) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          className="flex items-center gap-2 rounded-lg px-2 py-1.5 transition-colors hover:bg-slate-50"
+        >
+          <Avatar className="h-8 w-8 shrink-0">
+            <AvatarFallback className="bg-sky-600 text-[11px] font-semibold text-white">
+              {initials}
+            </AvatarFallback>
+          </Avatar>
+
+          <div className="hidden text-left sm:block">
+            <p className="max-w-[160px] truncate text-xs font-semibold text-slate-700">
+              {userName ?? "—"}
+            </p>
+
+            <p className="text-[10px] text-slate-400">
+              {getRoleLabel(userRole)}
+            </p>
+          </div>
+
+          <ChevronDown className="hidden h-3.5 w-3.5 text-slate-400 sm:block" />
+        </button>
+      </DropdownMenuTrigger>
+
+      <DropdownMenuContent
+        side="bottom"
+        align="end"
+        className="w-56"
+      >
+        <DropdownMenuLabel>
+          <p className="font-medium">{userName ?? "—"}</p>
+
+          <p className="text-xs font-normal text-slate-400">
+            {getRoleLabel(userRole)}
+          </p>
+        </DropdownMenuLabel>
+
+        <DropdownMenuSeparator />
+
+        <DropdownMenuItem
+          onClick={handleLogout}
+          className="cursor-pointer text-red-600 focus:bg-red-50 focus:text-red-600"
+        >
+          <LogOut className="mr-2 h-4 w-4" />
+          Sign out
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+/* ========================================================================
+   MAIN LAYOUT
+======================================================================== */
 
 export default function AdminLayout({
   children,
 }: {
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   const router = useRouter();
   const pathname = usePathname();
+
   const { user, hydrate, logout } = useAuthStore();
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [mobileMasterDataOpen, setMobileMasterDataOpen] = useState(false);
+
+  /* ----------------------------------------------------------------------
+     STATE
+  ---------------------------------------------------------------------- */
+
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [masterDataOpen, setMasterDataOpen] = useState(false);
+
+  /* ----------------------------------------------------------------------
+     HYDRATE AUTH
+  ---------------------------------------------------------------------- */
 
   useEffect(() => {
     hydrate();
   }, [hydrate]);
 
-  // tutup drawer otomatis tiap kali pindah halaman
+  /* ----------------------------------------------------------------------
+     CLOSE MOBILE SIDEBAR WHEN ROUTE CHANGES
+  ---------------------------------------------------------------------- */
+
   useEffect(() => {
-    setMobileNavOpen(false);
+    setSidebarOpen(false);
   }, [pathname]);
+
+  /* ----------------------------------------------------------------------
+     AUTO OPEN MASTER DATA WHEN CHILD IS ACTIVE
+  ---------------------------------------------------------------------- */
+
+  useEffect(() => {
+    const masterData = NAV_ITEMS.find(
+      (item): item is NavGroup =>
+        isNavGroup(item) && item.label === "Master Data"
+    );
+
+    if (!masterData) {
+      return;
+    }
+
+    const active = masterData.children.some(
+      (child) =>
+        pathname === child.href ||
+        pathname.startsWith(`${child.href}/`)
+    );
+
+    if (active) {
+      setMasterDataOpen(true);
+    }
+  }, [pathname]);
+
+  /* ----------------------------------------------------------------------
+     LOGOUT
+  ---------------------------------------------------------------------- */
 
   const handleLogout = () => {
     logout();
     router.push("/login");
   };
 
-  // filter berdasarkan role, termasuk filter di dalam children grup
-  const filteredNav = NAV_ITEMS.filter(
-    (item) => !user || (item.roles as readonly string[]).includes(user.role)
-  ).map((item) =>
-    "children" in item
-      ? {
-        ...item,
-        children: item.children.filter(
-          (c) => !user || (c.roles as readonly string[]).includes(user.role)
-        ),
+  /* ----------------------------------------------------------------------
+     USER INFORMATION
+  ---------------------------------------------------------------------- */
+
+  const userRole = user?.role;
+
+  /* ----------------------------------------------------------------------
+     FILTER NAVIGATION BY ROLE
+  ---------------------------------------------------------------------- */
+
+  const filteredNav = NAV_ITEMS.reduce<NavigationItem[]>(
+    (result, item) => {
+      /*
+       * If role is unknown, don't hide navigation.
+       * This prevents the UI from disappearing while auth is hydrating.
+       */
+      if (!user || !isValidRole(userRole)) {
+        result.push(item);
+        return result;
       }
-      : item
+
+      if (!item.roles.includes(userRole)) {
+        return result;
+      }
+
+      if (isNavGroup(item)) {
+        const children = item.children.filter((child) =>
+          child.roles.includes(userRole)
+        );
+
+        if (children.length > 0) {
+          result.push({
+            ...item,
+            children,
+          });
+        }
+
+        return result;
+      }
+
+      result.push(item);
+
+      return result;
+    },
+    []
   );
 
-  const isActive = (href: string) =>
-    pathname === href || (href !== "/dashboard" && pathname.startsWith(href));
+  /* ----------------------------------------------------------------------
+     ACTIVE CHECK
+  ---------------------------------------------------------------------- */
 
-  // grup aktif jika salah satu child-nya aktif
-  const isGroupActive = (children: readonly { href: string }[]) =>
-    children.some((c) => isActive(c.href));
+  const isActive = (href: string): boolean =>
+    pathname === href ||
+    (href !== "/dashboard" && pathname.startsWith(`${href}/`));
 
-  // label breadcrumb: cari di top-level dulu, lalu cari di dalam children
+  /* ----------------------------------------------------------------------
+     ACTIVE BREADCRUMB
+  ---------------------------------------------------------------------- */
+
   const activeLabel = (() => {
     for (const item of filteredNav) {
-      if ("href" in item && isActive(item.href)) return item.label;
-      if ("children" in item) {
-        const child = item.children.find((c) => isActive(c.href));
-        if (child) return `${item.label} / ${child.label}`;
+      if (!isNavGroup(item) && isActive(item.href)) {
+        return item.label;
+      }
+
+      if (isNavGroup(item)) {
+        const child = item.children.find((childItem) =>
+          isActive(childItem.href)
+        );
+
+        if (child) {
+          return `${item.label} / ${child.label}`;
+        }
       }
     }
-    return pathname.split("/")[1] || "Dashboard";
+
+    const segment = pathname.split("/").filter(Boolean)[0];
+
+    if (!segment) {
+      return "Dashboard";
+    }
+
+    return segment
+      .split("-")
+      .map(
+        (word) =>
+          word.charAt(0).toUpperCase() + word.slice(1)
+      )
+      .join(" ");
   })();
+
+  /* ----------------------------------------------------------------------
+     INITIALS
+  ---------------------------------------------------------------------- */
 
   const initials = user?.name
     ? user.name
-      .split(" ")
-      .slice(0, 2)
-      .map((w) => w[0])
-      .join("")
-      .toUpperCase()
+        .trim()
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((word) => word.charAt(0))
+        .join("")
+        .toUpperCase()
     : "?";
 
+  /* ======================================================================
+     RENDER
+  ====================================================================== */
+
   return (
-    <div className="flex h-screen flex-col bg-slate-50 overflow-hidden">
-      {/* ── Header bar ───────────────────────────────────────────────────── */}
-      <header className="flex h-12 shrink-0 items-center gap-3 border-b border-slate-200 bg-slate-800 px-4 sm:px-5">
-        {/* Mobile hamburger */}
-        <button
-          onClick={() => setMobileNavOpen((v) => !v)}
-          className="text-slate-300 hover:text-white lg:hidden"
-          aria-label="Toggle navigation menu"
-        >
-          {mobileNavOpen ? (
-            <X className="h-4 w-4" />
-          ) : (
-            <Menu className="h-4 w-4" />
-          )}
-        </button>
+    <div className="flex h-screen overflow-hidden bg-slate-50">
+      {/* ==================================================================
+          DESKTOP SIDEBAR
+      ================================================================== */}
 
-        {/* Logo + app name */}
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="flex h-8 w-20 shrink-0 items-center justify-center rounded-md bg-white/10">
-            {/* <ShieldCheck className="h-3.5 w-3.5 text-white" /> */}
-            <img src={LOGO_SRC} alt="Yusen Logistics" className="h-7 w-auto" />
-          </div>
-          <span className="truncate text-sm font-semibold text-white">
-            PT Yusen Logistics Interlink Indonesia <span className="hidden font-normal text-slate-400 sm:inline">— Safety Management System</span>
-          </span>
-        </div>
+      <aside className="hidden w-64 shrink-0 bg-slate-800 lg:block">
+        <SidebarContent
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+          masterDataOpen={masterDataOpen}
+          setMasterDataOpen={setMasterDataOpen}
+          filteredNav={filteredNav}
+          pathname={pathname}
+          initials={initials}
+          userName={user?.name}
+          userRole={user?.role}
+          handleLogout={handleLogout}
+        />
+      </aside>
 
-        {/* Right: user dropdown */}
-        <div className="ml-auto flex items-center gap-3">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button className="flex items-center gap-2 rounded-md px-1.5 py-1 hover:bg-white/5 transition-colors">
-                <Avatar className="h-6 w-6 shrink-0">
-                  <AvatarFallback className="bg-slate-600 text-[10px] text-white">
-                    {initials}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="hidden text-xs font-medium text-slate-200 sm:block">
-                  {user?.name ?? "—"}
-                </span>
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent side="bottom" align="end" className="w-48">
-              <DropdownMenuLabel className="text-xs">
-                <p className="font-medium">{user?.name}</p>
-                <p className="font-normal text-slate-400">
-                  {user ? ROLE_LABEL[user.role] : "—"}
-                </p>
-              </DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={handleLogout}
-                className="cursor-pointer text-xs text-red-600 focus:bg-red-50 focus:text-red-600"
-              >
-                <LogOut className="mr-2 h-3.5 w-3.5" />
-                Sign out
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </header>
+      {/* ==================================================================
+          MOBILE OVERLAY
+      ================================================================== */}
 
-      {/* ── Tab nav (desktop, horizontal) ───────────────────────────────── */}
-      <nav className="hidden h-10 shrink-0 items-stretch border-b border-slate-200 bg-white px-3 lg:flex">
-        {filteredNav.map((item) => {
-          // ── Grouped item (Master Data): hover dropdown ──────────────────
-          if ("children" in item) {
-            if (item.children.length === 0) return null;
-            const active = isGroupActive(item.children);
-            return (
-              <div key={item.label} className="group relative flex items-stretch">
-                <button
-                  type="button"
-                  className={cn(
-                    "flex items-center gap-1.5 border-b-2 px-3.5 text-xs font-medium transition-colors",
-                    active
-                      ? "border-sky-500 text-slate-800"
-                      : "border-transparent text-slate-500 hover:border-slate-200 hover:text-slate-700"
-                  )}
-                >
-                  <item.icon
-                    className={cn("h-3.5 w-3.5", active ? "text-sky-600" : "text-slate-400")}
-                  />
-                  {item.label}
-                  <ChevronDown className="h-3 w-3 text-slate-400 transition-transform group-hover:rotate-180" />
-                </button>
-
-                {/* dropdown panel — muncul saat group di-hover */}
-                <div className="invisible absolute left-0 top-full z-30 min-w-[180px] rounded-b-md border border-slate-200 bg-white py-1 opacity-0 shadow-lg transition-all duration-150 group-hover:visible group-hover:opacity-100">
-                  {item.children.map((child) => {
-                    const childActive = isActive(child.href);
-                    return (
-                      <Link
-                        key={child.href}
-                        href={child.href}
-                        className={cn(
-                          "flex items-center gap-2 px-3.5 py-2 text-xs font-medium transition-colors",
-                          childActive
-                            ? "bg-sky-50 text-slate-800"
-                            : "text-slate-500 hover:bg-slate-50 hover:text-slate-700"
-                        )}
-                      >
-                        <child.icon
-                          className={cn("h-3.5 w-3.5", childActive ? "text-sky-600" : "text-slate-400")}
-                        />
-                        {child.label}
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            );
-          }
-
-          // ── Simple item ──────────────────────────────────────────────────
-          const active = isActive(item.href);
-          return (
-            <Link
-              key={item.href}
-              href={item.href}
-              className={cn(
-                "flex items-center gap-1.5 border-b-2 px-3.5 text-xs font-medium transition-colors",
-                active
-                  ? "border-sky-500 text-slate-800"
-                  : "border-transparent text-slate-500 hover:border-slate-200 hover:text-slate-700"
-              )}
-            >
-              <item.icon
-                className={cn("h-3.5 w-3.5", active ? "text-sky-600" : "text-slate-400")}
-              />
-              {item.label}
-            </Link>
-          );
-        })}
-      </nav>
-
-      {/* ── Mobile nav drawer ────────────────────────────────────────────── */}
-      {mobileNavOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-20 bg-black/30 lg:hidden"
-            onClick={() => setMobileNavOpen(false)}
-          />
-          <nav className="fixed inset-x-0 top-12 z-30 max-h-[calc(100vh-3rem)] overflow-y-auto border-b border-slate-200 bg-white shadow-lg lg:hidden">
-            {filteredNav.map((item) => {
-              // ── Grouped item (Master Data): expand/collapse ──────────────
-              if ("children" in item) {
-                if (item.children.length === 0) return null;
-                const active = isGroupActive(item.children);
-                return (
-                  <div key={item.label}>
-                    <button
-                      type="button"
-                      onClick={() => setMobileMasterDataOpen((v) => !v)}
-                      className={cn(
-                        "flex w-full items-center gap-2.5 border-l-2 px-4 py-3 text-sm font-medium transition-colors",
-                        active
-                          ? "border-sky-500 bg-sky-50 text-slate-800"
-                          : "border-transparent text-slate-500 hover:bg-slate-50"
-                      )}
-                    >
-                      <item.icon
-                        className={cn("h-4 w-4", active ? "text-sky-600" : "text-slate-400")}
-                      />
-                      {item.label}
-                      <ChevronDown
-                        className={cn(
-                          "ml-auto h-3.5 w-3.5 text-slate-400 transition-transform",
-                          mobileMasterDataOpen && "rotate-180"
-                        )}
-                      />
-                    </button>
-
-                    {mobileMasterDataOpen && (
-                      <div className="bg-slate-50/60">
-                        {item.children.map((child) => {
-                          const childActive = isActive(child.href);
-                          return (
-                            <Link
-                              key={child.href}
-                              href={child.href}
-                              className={cn(
-                                "flex items-center gap-2.5 border-l-2 py-2.5 pl-9 pr-4 text-sm font-medium transition-colors",
-                                childActive
-                                  ? "border-sky-500 bg-sky-50 text-slate-800"
-                                  : "border-transparent text-slate-500 hover:bg-slate-100"
-                              )}
-                            >
-                              <child.icon
-                                className={cn("h-3.5 w-3.5", childActive ? "text-sky-600" : "text-slate-400")}
-                              />
-                              {child.label}
-                            </Link>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                );
-              }
-
-              // ── Simple item ──────────────────────────────────────────────
-              const active = isActive(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className={cn(
-                    "flex items-center gap-2.5 border-l-2 px-4 py-3 text-sm font-medium transition-colors",
-                    active
-                      ? "border-sky-500 bg-sky-50 text-slate-800"
-                      : "border-transparent text-slate-500 hover:bg-slate-50"
-                  )}
-                >
-                  <item.icon
-                    className={cn("h-4 w-4", active ? "text-sky-600" : "text-slate-400")}
-                  />
-                  {item.label}
-                  {active && (
-                    <ChevronRight className="ml-auto h-3.5 w-3.5 text-slate-400" />
-                  )}
-                </Link>
-              );
-            })}
-          </nav>
-        </>
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[1px] lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+          aria-hidden="true"
+        />
       )}
 
-      {/* ── Breadcrumb row ───────────────────────────────────────────────── */}
-      <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-slate-200 bg-white px-4 text-xs text-slate-500 sm:px-5">
-        <span className="text-slate-400">SMS</span>
-        <ChevronRight className="h-3 w-3 text-slate-300" />
-        <span className="font-medium text-slate-700">{activeLabel}</span>
-      </div>
+      {/* ==================================================================
+          MOBILE SIDEBAR
+      ================================================================== */}
 
-      {/* ── Page content (unchanged) ─────────────────────────────────────── */}
-      <main className="flex-1 overflow-y-auto">{children}</main>
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 w-72 bg-slate-800 shadow-2xl transition-transform duration-200 lg:hidden",
+          sidebarOpen
+            ? "translate-x-0"
+            : "-translate-x-full"
+        )}
+        aria-label="Mobile navigation"
+      >
+        <SidebarContent
+          mobile
+          sidebarOpen={sidebarOpen}
+          setSidebarOpen={setSidebarOpen}
+          masterDataOpen={masterDataOpen}
+          setMasterDataOpen={setMasterDataOpen}
+          filteredNav={filteredNav}
+          pathname={pathname}
+          initials={initials}
+          userName={user?.name}
+          userRole={user?.role}
+          handleLogout={handleLogout}
+        />
+      </aside>
+
+      {/* ==================================================================
+          MAIN AREA
+      ================================================================== */}
+
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* ================================================================
+            TOP HEADER
+        ================================================================ */}
+
+        <header className="flex h-14 shrink-0 items-center border-b border-slate-200 bg-white px-4 sm:px-5">
+          {/* Mobile hamburger */}
+
+          <button
+            type="button"
+            onClick={() =>
+              setSidebarOpen((value) => !value)
+            }
+            className="mr-3 rounded-md p-1.5 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-800 lg:hidden"
+            aria-label={
+              sidebarOpen
+                ? "Close navigation"
+                : "Open navigation"
+            }
+            aria-expanded={sidebarOpen}
+          >
+            {sidebarOpen ? (
+              <X className="h-5 w-5" />
+            ) : (
+              <Menu className="h-5 w-5" />
+            )}
+          </button>
+
+          {/* ==============================================================
+              PAGE TITLE / BREADCRUMB
+          ============================================================== */}
+
+          <div className="flex min-w-0 items-center gap-2">
+            <div className="hidden items-center gap-2 sm:flex">
+              <ShieldCheck className="h-4 w-4 text-sky-600" />
+
+              <span className="text-xs font-medium text-slate-400">
+                Safety Management System
+              </span>
+
+              <ChevronRight className="h-3.5 w-3.5 text-slate-300" />
+            </div>
+
+            <span className="truncate text-sm font-semibold text-slate-700">
+              {activeLabel}
+            </span>
+          </div>
+
+          {/* ==============================================================
+              RIGHT USER AREA
+          ============================================================== */}
+
+          <div className="ml-auto flex items-center gap-2">
+            <UserMenu
+              userName={user?.name}
+              userRole={user?.role}
+              initials={initials}
+              handleLogout={handleLogout}
+            />
+          </div>
+        </header>
+
+        {/* ================================================================
+            PAGE CONTENT
+        ================================================================ */}
+
+        <main className="min-h-0 flex-1 overflow-y-auto bg-slate-50">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

@@ -18,11 +18,86 @@ import {
     ZoomIn,
     X,
     ChevronRight,
+    XCircle,
+    ShieldCheck,
+    Pencil,
 } from "lucide-react";
 import api from "@/lib/api";
+import Select from "react-select";
 import type { RiskReport, ReportFile, ReportStatus, ReportData, Recipient } from "@/types/api";
 import { cn, formatDate, STATUS_LABEL, STATUS_COLOR, RISK_LABEL, RISK_COLOR } from "@/lib/utils";
 import { useAuthStore } from "@/store/authStore";
+
+type DetectionLocation = {
+    id: number;
+    site: string;
+    area_name: string;
+    department_id?: number | null;
+    is_active: boolean;
+};
+
+type DetectionDepartment = {
+    id: number;
+    name: string;
+    site?: string;
+    is_active: boolean;
+};
+
+type SelectOption = {
+    value: string;
+    label: string;
+};
+
+const detectionSelectStyles = {
+    control: (base: any, state: any) => ({
+        ...base,
+        minHeight: 38,
+        fontSize: 12,
+        borderRadius: 8,
+        borderColor: state.isFocused ? "#94a3b8" : "#e2e8f0",
+        boxShadow: "none",
+        "&:hover": {
+            borderColor: "#94a3b8",
+        },
+    }),
+    valueContainer: (base: any) => ({
+        ...base,
+        padding: "0 10px",
+    }),
+    indicatorsContainer: (base: any) => ({
+        ...base,
+        minHeight: 36,
+    }),
+    placeholder: (base: any) => ({
+        ...base,
+        fontSize: 12,
+        color: "#94a3b8",
+    }),
+    singleValue: (base: any) => ({
+        ...base,
+        fontSize: 12,
+        color: "#334155",
+    }),
+    menuPortal: (base: any) => ({
+        ...base,
+        zIndex: 9999,
+    }),
+    menu: (base: any) => ({
+        ...base,
+        zIndex: 9999,
+        fontSize: 12,
+    }),
+    option: (base: any, state: any) => ({
+        ...base,
+        fontSize: 12,
+        color: "#334155",
+        backgroundColor: state.isSelected
+            ? "#e2e8f0"
+            : state.isFocused
+                ? "#f8fafc"
+                : "#ffffff",
+    }),
+};
 
 // ── Stepper config ────────────────────────────────────────────────────────────
 
@@ -46,7 +121,6 @@ function groupFilesByStep(files: ReportFile[]): { step: ReportStatus; files: Rep
         groups.get(step)!.push(f);
     }
 
-    console.log({ groups });
     return STEP_ORDER.filter((s) => groups.has(s)).map((step) => ({ step, files: groups.get(step)! }));
 }
 
@@ -443,21 +517,84 @@ export default function ReportDetailPage() {
     const [investigateFiles, setInvestigateFiles] = useState<File[]>([]);
     const [hodFiles, setHodFiles] = useState<File[]>([]);
 
+    const [editModalOpen, setEditModalOpen] = useState(false);
+
+    const [editLoading, setEditLoading] = useState(false);
+
+    const [editError, setEditError] = useState<string | null>(null);
+
+    const [editReason, setEditReason] = useState("");
+
+    const [editForm, setEditForm] = useState({
+        location_id: "",
+        department_id: "",
+        risk_level: "low",
+        description: "",
+    });
+
+    const [locations, setLocations] = useState<DetectionLocation[]>([]);
+    const [departments, setDepartments] = useState<DetectionDepartment[]>([]);
+    const [masterLoading, setMasterLoading] = useState(false);
+
+    const fetchDetectionMasters = async () => {
+        setMasterLoading(true);
+
+        try {
+            const [locationRes, departmentRes] = await Promise.all([
+                api.get<DetectionLocation[]>("/locations"),
+                api.get<DetectionDepartment[]>("/departments"),
+            ]);
+
+            setLocations(Array.isArray(locationRes.data) ? locationRes.data : []);
+            setDepartments(Array.isArray(departmentRes.data) ? departmentRes.data : []);
+        } catch (err) {
+            console.error("Failed to load detection master data:", err);
+            setLocations([]);
+            setDepartments([]);
+        } finally {
+            setMasterLoading(false);
+        }
+    };
+
     const fetchDetail = () => {
         setLoading(true);
+
         api
             .get<ReportData>(`/reports/${reportId}`)
             .then((res) => {
                 setDetail(res.data.report);
                 setRecipients(res.data.recipients ?? []);
+
                 setClassifyForm({
                     risk_level: res.data.report.risk_level || "low",
                     priority: res.data.report.priority || "low",
                     notes: res.data.report.pic_notes || "",
                 });
+
                 setInvestigateForm({
                     root_cause: res.data.report.root_cause || "",
                     countermeasures: res.data.report.countermeasures || "",
+                });
+
+                setEditForm({
+                    location_id: res.data.report.location_id
+                        ? String(res.data.report.location_id)
+                        : res.data.report.location?.id
+                            ? String(res.data.report.location.id)
+                            : "",
+
+                    department_id: res.data.report.department_id
+                        ? String(res.data.report.department_id)
+                        : res.data.report.department?.id
+                            ? String(res.data.report.department.id)
+                            : "",
+
+                    risk_level:
+                        res.data.report.risk_level_origin ||
+                        res.data.report.risk_level ||
+                        "low",
+
+                    description: res.data.report.description || "",
                 });
             })
             .catch(() => setNotFound(true))
@@ -467,6 +604,7 @@ export default function ReportDetailPage() {
     useEffect(() => {
         if (!reportId) return;
         fetchDetail();
+        fetchDetectionMasters();
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [reportId]);
 
@@ -563,6 +701,146 @@ export default function ReportDetailPage() {
         }
     };
 
+    const approveDetectionEdit = async (
+        requestId: number
+    ) => {
+
+        setActionLoading(true);
+        setActionError(null);
+
+        try {
+
+            await api.post(
+                `/reports/${reportId}/edit-request/${requestId}/approve`
+            );
+
+            fetchDetail();
+
+        } catch (err: any) {
+
+            setActionError(
+                err?.response?.data?.error ??
+                "Failed to approve detection edit"
+            );
+
+        } finally {
+
+            setActionLoading(false);
+
+        }
+    };
+
+    const rejectDetectionEdit = async (
+        requestId: number
+    ) => {
+
+        const note = window.prompt(
+            "Enter rejection reason"
+        );
+
+        if (!note?.trim()) {
+            return;
+        }
+
+        setActionLoading(true);
+        setActionError(null);
+
+        try {
+
+            await api.post(
+                `/reports/${reportId}/edit-request/${requestId}/reject`,
+                {
+                    note,
+                }
+            );
+
+            fetchDetail();
+
+        } catch (err: any) {
+
+            setActionError(
+                err?.response?.data?.error ??
+                "Failed to reject detection edit"
+            );
+
+        } finally {
+
+            setActionLoading(false);
+
+        }
+    };
+
+    const submitDetectionEditRequest = async () => {
+
+        if (!editReason.trim()) {
+            setEditError("Reason for change is required");
+            return;
+        }
+
+        if (!editForm.description.trim()) {
+            setEditError("Description is required");
+            return;
+        }
+
+        setEditLoading(true);
+        setEditError(null);
+
+        try {
+
+            await api.post(
+                `/reports/${reportId}/edit-request`,
+                {
+                    location_id: editForm.location_id
+                        ? Number(editForm.location_id)
+                        : null,
+
+                    department_id: editForm.department_id
+                        ? Number(editForm.department_id)
+                        : null,
+
+                    risk_level: editForm.risk_level,
+
+                    description: editForm.description,
+
+                    reason: editReason,
+                }
+            );
+
+            setEditModalOpen(false);
+            setEditReason("");
+
+            fetchDetail();
+
+        } catch (err: any) {
+
+            setEditError(
+                err?.response?.data?.error ??
+                "Failed to submit edit request"
+            );
+
+        } finally {
+
+            setEditLoading(false);
+
+        }
+    };
+
+    useEffect(() => {
+        if (!editModalOpen) return;
+
+        const handleKeyDown = (event: KeyboardEvent) => {
+            if (event.key === "Escape" && !editLoading) {
+                setEditModalOpen(false);
+            }
+        };
+
+        window.addEventListener("keydown", handleKeyDown);
+
+        return () => {
+            window.removeEventListener("keydown", handleKeyDown);
+        };
+    }, [editModalOpen, editLoading]);
+
     if (loading) {
         return (
             <div className="flex items-center justify-center h-full">
@@ -587,6 +865,144 @@ export default function ReportDetailPage() {
     }
 
     const d = detail;
+
+    const locationOptions: SelectOption[] = locations
+        .filter((location) => location.is_active)
+        .map((location) => ({
+            value: String(location.id),
+            label: `${location.area_name}${location.site ? ` · ${location.site}` : ""}`,
+        }));
+
+    const departmentOptions: SelectOption[] = departments
+        .filter((department) => department.is_active)
+        .map((department) => ({
+            value: String(department.id),
+            label: `${department.name}${department.site ? ` · ${department.site}` : ""}`,
+        }));
+
+    const selectedLocation =
+        locationOptions.find(
+            (option) => option.value === editForm.location_id
+        ) ?? null;
+
+    const selectedDepartment =
+        departmentOptions.find(
+            (option) => option.value === editForm.department_id
+        ) ?? null;
+
+    const pendingEditRequest =
+        d.edit_requests?.find(
+            (request) => request.status === "pending"
+        ) ?? null;
+
+    const getLocationLabel = (id?: number | null) => {
+        if (!id) return "—";
+
+        const location = locations.find(
+            (item) => item.id === Number(id)
+        );
+
+        if (!location) {
+            return `Location #${id}`;
+        }
+
+        return `${location.area_name}${location.site ? ` · ${location.site}` : ""}`;
+    };
+
+    const getDepartmentLabel = (id?: number | null) => {
+        if (!id) return "—";
+
+        const department = departments.find(
+            (item) => item.id === Number(id)
+        );
+
+        if (!department) {
+            return `Department #${id}`;
+        }
+
+        return `${department.name}${department.site ? ` · ${department.site}` : ""}`;
+    };
+
+    const currentLocationId =
+        d.location_id ??
+        d.location?.id ??
+        null;
+
+    const currentDepartmentId =
+        d.department_id ??
+        d.department?.id ??
+        null;
+
+    const currentRiskLevel =
+        d.risk_level_origin ||
+        d.risk_level ||
+        "";
+
+    const detectionEditChanges = pendingEditRequest
+        ? [
+            {
+                key: "location",
+                label: "Location",
+                oldValue: getLocationLabel(currentLocationId),
+                newValue: getLocationLabel(
+                    pendingEditRequest.location_id
+                ),
+                changed:
+                    Number(currentLocationId ?? 0) !==
+                    Number(pendingEditRequest.location_id ?? 0),
+            },
+            {
+                key: "department",
+                label: "Department",
+                oldValue: getDepartmentLabel(currentDepartmentId),
+                newValue: getDepartmentLabel(
+                    pendingEditRequest.department_id
+                ),
+                changed:
+                    Number(currentDepartmentId ?? 0) !==
+                    Number(pendingEditRequest.department_id ?? 0),
+            },
+            {
+                key: "risk_level",
+                label: "Risk Level",
+                oldValue: currentRiskLevel
+                    ? RISK_LABEL[currentRiskLevel as keyof typeof RISK_LABEL] ??
+                    currentRiskLevel
+                    : "—",
+                newValue: pendingEditRequest.risk_level
+                    ? RISK_LABEL[
+                    pendingEditRequest.risk_level as keyof typeof RISK_LABEL
+                    ] ?? pendingEditRequest.risk_level
+                    : "—",
+                changed:
+                    currentRiskLevel !==
+                    pendingEditRequest.risk_level,
+            },
+            {
+                key: "description",
+                label: "Summary",
+                oldValue: d.description || "—",
+                newValue: pendingEditRequest.description || "—",
+                changed:
+                    (d.description || "").trim() !==
+                    (pendingEditRequest.description || "").trim(),
+            },
+        ].filter((item) => item.changed)
+        : [];
+
+    const detectionEditChangeCount =
+        detectionEditChanges.length;
+
+    const canRequestDetectionEdit =
+        !!user &&
+        (user.role === "pic" ||
+            user.role === "hod" ||
+            user.role === "admin");
+
+    const canApproveDetectionEdit =
+        !!user &&
+        (user.role === "pic" ||
+            user.role === "admin");
 
     const canClassify =
         d.status === "declaration" && (user?.role === "pic" || user?.role === "admin");
@@ -654,37 +1070,116 @@ export default function ReportDetailPage() {
             <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
                 {/* ── Kolom kiri ───────────────────────────────────────────────── */}
                 <div className="space-y-4">
+
                     <ColumnCard title="Detection">
+
+                        {/* ============================================================
+        HEADER
+    ============================================================ */}
+
+                        <div className="flex items-center justify-between mb-3">
+
+                            <div className="flex items-center gap-2">
+
+                                <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">
+                                    Detection Information
+                                </p>
+
+                                {pendingEditRequest && (
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[9px] font-medium text-amber-600">
+                                        <Clock className="h-2.5 w-2.5" />
+                                        Pending PIC
+                                    </span>
+                                )}
+
+                            </div>
+
+                            {canRequestDetectionEdit &&
+                                !pendingEditRequest && (
+                                    <button
+                                        type="button"
+                                        onClick={() => {
+                                            setEditError(null);
+                                            setEditReason("");
+
+                                            setEditForm({
+                                                location_id: d.location_id
+                                                    ? String(d.location_id)
+                                                    : d.location?.id
+                                                        ? String(d.location.id)
+                                                        : "",
+
+                                                department_id: d.department_id
+                                                    ? String(d.department_id)
+                                                    : d.department?.id
+                                                        ? String(d.department.id)
+                                                        : "",
+
+                                                risk_level: d.risk_level_origin || d.risk_level || "low",
+
+                                                description: d.description || "",
+                                            });
+
+                                            setEditModalOpen(true);
+                                        }}
+                                        className="inline-flex items-center gap-1 rounded-md border border-slate-200 px-2 py-1 text-[10px] font-medium text-slate-500 transition-colors hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700"
+                                    >
+                                        <Pencil className="h-3 w-3" />
+                                        Request Edit
+                                    </button>
+                                )}
+
+                        </div>
+
+                        {/* ============================================================
+        CURRENT DATA
+    ============================================================ */}
+
                         <div className="grid grid-cols-3 gap-x-3">
+
                             <ReadField
                                 label="Location"
-                                value={d.location ? (
-                                    <span className="flex items-center gap-1">
-                                        <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
-                                        {d.location.area_name}
-                                    </span>
-                                ) : undefined}
+                                value={
+                                    d.location ? (
+                                        <span className="flex items-center gap-1">
+                                            <MapPin className="w-3 h-3 text-slate-400 shrink-0" />
+                                            {d.location.area_name}
+                                        </span>
+                                    ) : undefined
+                                }
                             />
+
                             <ReadField
                                 label="Department"
-                                value={d.department ? (
-                                    <span className="flex items-center gap-1">
-                                        <Building2 className="w-3 h-3 text-slate-400 shrink-0" />
-                                        {d.department.name}
-                                    </span>
-                                ) : undefined}
+                                value={
+                                    d.department ? (
+                                        <span className="flex items-center gap-1">
+                                            <Building2 className="w-3 h-3 text-slate-400 shrink-0" />
+                                            {d.department.name}
+                                        </span>
+                                    ) : undefined
+                                }
                             />
+
                             <ReadField
                                 label="Risk Level"
-                                value={d.risk_level_origin ? (
-                                    <span className="flex items-center gap-1">
-                                        <AlertTriangle className="w-3 h-3 text-slate-400 shrink-0" />
-                                        {d.risk_level_origin}
-                                    </span>
-                                ) : undefined}
+                                value={
+                                    d.risk_level_origin ? (
+                                        <span className="flex items-center gap-1">
+                                            <AlertTriangle className="w-3 h-3 text-slate-400 shrink-0" />
+                                            {d.risk_level_origin}
+                                        </span>
+                                    ) : undefined
+                                }
                             />
+
                         </div>
-                        <ReadField label="Summary" value={d.description} />
+
+                        <ReadField
+                            label="Summary"
+                            value={d.description}
+                        />
+
                         <ReadField
                             label="Reported by"
                             value={
@@ -694,9 +1189,243 @@ export default function ReportDetailPage() {
                                 </span>
                             }
                         />
-                        <ReadField label="Reported at" value={formatDate(d.created_at)} />
-                    </ColumnCard>
 
+                        <ReadField
+                            label="Reported at"
+                            value={formatDate(d.created_at)}
+                        />
+
+                        {/* ============================================================
+        PENDING REQUEST
+    ============================================================ */}
+
+                        {pendingEditRequest && (
+                            <div className="mt-4 overflow-hidden rounded-lg border border-amber-200 bg-amber-50/50">
+
+                                {/* Header */}
+                                <div className="flex items-center justify-between gap-3 border-b border-amber-100 px-3 py-2.5">
+
+                                    <div className="flex items-center gap-2">
+                                        <div className="flex h-6 w-6 items-center justify-center rounded-md bg-amber-100">
+                                            <ShieldCheck className="h-3.5 w-3.5 text-amber-600" />
+                                        </div>
+
+                                        <div>
+                                            <p className="text-[11px] font-semibold text-amber-900">
+                                                Detection Edit Request
+                                            </p>
+
+                                            <p className="text-[9px] text-amber-600">
+                                                Waiting for PIC approval
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    <span className="inline-flex items-center gap-1 rounded-full border border-amber-200 bg-white px-2 py-0.5 text-[9px] font-medium text-amber-600">
+                                        <Clock className="h-2.5 w-2.5" />
+                                        Pending
+                                    </span>
+
+                                </div>
+
+                                <div className="space-y-3 p-3">
+
+                                    {/* Request info */}
+                                    <div className="grid grid-cols-2 gap-3">
+
+                                        <div>
+                                            <p className="mb-0.5 text-[9px] uppercase tracking-wider text-slate-400">
+                                                Requested by
+                                            </p>
+
+                                            <p className="text-[11px] font-medium text-slate-700">
+                                                {pendingEditRequest.requested_name || "—"}
+                                            </p>
+                                        </div>
+
+                                        <div>
+                                            <p className="mb-0.5 text-[9px] uppercase tracking-wider text-slate-400">
+                                                Requested at
+                                            </p>
+
+                                            <p className="text-[11px] text-slate-700">
+                                                {formatDate(pendingEditRequest.created_at)}
+                                            </p>
+                                        </div>
+
+                                    </div>
+
+                                    {/* Reason */}
+                                    <div>
+                                        <p className="mb-1 text-[9px] uppercase tracking-wider text-slate-400">
+                                            Reason
+                                        </p>
+
+                                        <div className="rounded-md border border-amber-100 bg-white/70 px-2.5 py-2">
+                                            <p className="text-[11px] leading-relaxed text-slate-700">
+                                                {pendingEditRequest.reason || "—"}
+                                            </p>
+                                        </div>
+                                    </div>
+
+                                    {/* Requested changes */}
+                                    <div>
+
+                                        <div className="mb-2 flex items-center justify-between">
+
+                                            <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-500">
+                                                Requested Changes
+                                            </p>
+
+                                            {detectionEditChangeCount > 0 && (
+                                                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[9px] font-medium text-amber-700">
+                                                    {detectionEditChangeCount}{" "}
+                                                    {detectionEditChangeCount === 1
+                                                        ? "field"
+                                                        : "fields"}
+                                                </span>
+                                            )}
+
+                                        </div>
+
+                                        {detectionEditChanges.length > 0 ? (
+
+                                            <div className="space-y-2">
+
+                                                {detectionEditChanges.map((change) => (
+
+                                                    <div
+                                                        key={change.key}
+                                                        className="rounded-lg border border-slate-200 bg-white p-2.5"
+                                                    >
+
+                                                        <p className="mb-2 text-[10px] font-semibold text-slate-700">
+                                                            {change.label}
+                                                        </p>
+
+                                                        <div className="grid grid-cols-[1fr_auto_1fr] items-start gap-2">
+
+                                                            {/* Current */}
+                                                            <div className="min-w-0">
+
+                                                                <p className="mb-1 text-[8px] font-medium uppercase tracking-wider text-slate-400">
+                                                                    Current
+                                                                </p>
+
+                                                                <div className="rounded-md bg-slate-50 px-2 py-1.5">
+                                                                    <p className="break-words text-[10px] leading-relaxed text-slate-500">
+                                                                        {change.oldValue}
+                                                                    </p>
+                                                                </div>
+
+                                                            </div>
+
+                                                            {/* Arrow */}
+                                                            <div className="flex h-full items-center pt-5">
+                                                                <ChevronRight className="h-3.5 w-3.5 text-amber-500" />
+                                                            </div>
+
+                                                            {/* Requested */}
+                                                            <div className="min-w-0">
+
+                                                                <p className="mb-1 text-[8px] font-medium uppercase tracking-wider text-amber-600">
+                                                                    Requested
+                                                                </p>
+
+                                                                <div className="rounded-md border border-amber-100 bg-amber-50 px-2 py-1.5">
+                                                                    <p className="break-words text-[10px] font-medium leading-relaxed text-slate-700">
+                                                                        {change.newValue}
+                                                                    </p>
+                                                                </div>
+
+                                                            </div>
+
+                                                        </div>
+
+                                                    </div>
+
+                                                ))}
+
+                                            </div>
+
+                                        ) : (
+
+                                            <div className="rounded-lg border border-slate-200 bg-white px-3 py-3 text-center">
+                                                <p className="text-[10px] text-slate-400">
+                                                    No data changes detected.
+                                                </p>
+                                            </div>
+
+                                        )}
+
+                                    </div>
+
+                                    {/* Warning */}
+                                    {detectionEditChangeCount > 0 && (
+                                        <div className="flex items-start gap-2 rounded-md border border-amber-100 bg-amber-100/50 px-2.5 py-2">
+
+                                            <AlertTriangle className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" />
+
+                                            <p className="text-[9px] leading-relaxed text-amber-700">
+                                                Approving this request will replace{" "}
+                                                {detectionEditChangeCount === 1
+                                                    ? "this field"
+                                                    : `these ${detectionEditChangeCount} fields`}{" "}
+                                                with the requested value.
+                                            </p>
+
+                                        </div>
+                                    )}
+
+                                    {/* Action */}
+                                    {canApproveDetectionEdit && (
+                                        <div className="grid grid-cols-2 gap-2 pt-1">
+
+                                            <button
+                                                type="button"
+                                                disabled={
+                                                    actionLoading ||
+                                                    detectionEditChangeCount === 0
+                                                }
+                                                onClick={() =>
+                                                    approveDetectionEdit(
+                                                        pendingEditRequest.id
+                                                    )
+                                                }
+                                                className="inline-flex items-center justify-center gap-1.5 rounded-md bg-emerald-600 px-2.5 py-2 text-[10px] font-medium text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+                                            >
+                                                {actionLoading ? (
+                                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                                ) : (
+                                                    <Check className="h-3 w-3" />
+                                                )}
+
+                                                Approve
+                                            </button>
+
+                                            <button
+                                                type="button"
+                                                disabled={actionLoading}
+                                                onClick={() =>
+                                                    rejectDetectionEdit(
+                                                        pendingEditRequest.id
+                                                    )
+                                                }
+                                                className="inline-flex items-center justify-center gap-1.5 rounded-md border border-red-200 bg-white px-2.5 py-2 text-[10px] font-medium text-red-600 transition-colors hover:bg-red-50 disabled:opacity-50"
+                                            >
+                                                <XCircle className="h-3 w-3" />
+                                                Reject
+                                            </button>
+
+                                        </div>
+                                    )}
+
+                                </div>
+
+                            </div>
+                        )}
+
+                    </ColumnCard>
                     {recipients.length > 0 && (
                         <ColumnCard title="Notification Recipients">
                             <div className="flex flex-col gap-2">
@@ -988,6 +1717,227 @@ export default function ReportDetailPage() {
                     )}
                 </div>
             </div>
+
+            {editModalOpen && (
+                <div
+                    className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4"
+                    onMouseDown={(e) => {
+                        if (e.target === e.currentTarget && !editLoading) {
+                            setEditModalOpen(false);
+                        }
+                    }}
+                >
+
+                    <div
+                        className="w-full max-w-xl rounded-xl bg-white shadow-2xl"
+                        onMouseDown={(e) => e.stopPropagation()}
+                    >
+
+                        {/* Header */}
+
+                        <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+
+                            <div>
+                                <h3 className="text-sm font-semibold text-slate-800">
+                                    Request Detection Edit
+                                </h3>
+
+                                <p className="mt-0.5 text-[10px] text-slate-400">
+                                    Changes require PIC approval before being applied.
+                                </p>
+                            </div>
+
+                            <button
+                                type="button"
+                                onClick={() => setEditModalOpen(false)}
+                                className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                            >
+                                <X className="h-4 w-4" />
+                            </button>
+
+                        </div>
+
+                        {/* Body */}
+
+                        <div className="space-y-4 px-5 py-4">
+
+                            {editError && (
+                                <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600">
+                                    {editError}
+                                </div>
+                            )}
+
+                            {/* Location */}
+
+                            <div>
+                                <label className="mb-1 block text-[10px] font-medium text-slate-500">
+                                    Location
+                                </label>
+
+                                <Select
+                                    options={locationOptions}
+                                    value={selectedLocation}
+                                    onChange={(option) => {
+                                        setEditForm((p) => ({
+                                            ...p,
+                                            location_id: option?.value ?? "",
+                                        }));
+                                        setEditError(null);
+                                    }}
+                                    isLoading={masterLoading}
+                                    isSearchable
+                                    isClearable
+                                    placeholder="Search location..."
+                                    noOptionsMessage={() => "No location found"}
+                                    loadingMessage={() => "Loading locations..."}
+                                    menuPortalTarget={
+                                        typeof document !== "undefined"
+                                            ? document.body
+                                            : undefined
+                                    }
+                                    styles={detectionSelectStyles}
+                                />
+                            </div>
+
+                            {/* Department */}
+
+                            <div>
+                                <label className="mb-1 block text-[10px] font-medium text-slate-500">
+                                    Department
+                                </label>
+
+                                <Select
+                                    options={departmentOptions}
+                                    value={selectedDepartment}
+                                    onChange={(option) => {
+                                        setEditForm((p) => ({
+                                            ...p,
+                                            department_id: option?.value ?? "",
+                                        }));
+                                        setEditError(null);
+                                    }}
+                                    isLoading={masterLoading}
+                                    isSearchable
+                                    isClearable
+                                    placeholder="Search department..."
+                                    noOptionsMessage={() => "No department found"}
+                                    loadingMessage={() => "Loading departments..."}
+                                    menuPortalTarget={
+                                        typeof document !== "undefined"
+                                            ? document.body
+                                            : undefined
+                                    }
+                                    styles={detectionSelectStyles}
+                                />
+                            </div>
+
+                            {/* Risk */}
+
+                            <div>
+                                <label className="mb-1 block text-[10px] font-medium text-slate-500">
+                                    Risk Level
+                                </label>
+
+                                <select
+                                    value={editForm.risk_level}
+                                    onChange={(e) =>
+                                        setEditForm((p) => ({
+                                            ...p,
+                                            risk_level: e.target.value,
+                                        }))
+                                    }
+                                    className="w-full rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-slate-400"
+                                >
+                                    <option value="low">
+                                        Low
+                                    </option>
+
+                                    <option value="medium">
+                                        Medium
+                                    </option>
+
+                                    <option value="high">
+                                        High
+                                    </option>
+                                </select>
+                            </div>
+
+                            {/* Description */}
+
+                            <div>
+                                <label className="mb-1 block text-[10px] font-medium text-slate-500">
+                                    Summary
+                                </label>
+
+                                <textarea
+                                    rows={5}
+                                    value={editForm.description}
+                                    onChange={(e) =>
+                                        setEditForm((p) => ({
+                                            ...p,
+                                            description: e.target.value,
+                                        }))
+                                    }
+                                    className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-slate-400"
+                                />
+                            </div>
+
+                            {/* Reason */}
+
+                            <div>
+                                <label className="mb-1 block text-[10px] font-medium text-slate-500">
+                                    Reason for Change
+                                    <span className="ml-1 text-red-500">
+                                        *
+                                    </span>
+                                </label>
+
+                                <textarea
+                                    rows={3}
+                                    value={editReason}
+                                    onChange={(e) =>
+                                        setEditReason(e.target.value)
+                                    }
+                                    placeholder="Explain why this detection data needs to be changed..."
+                                    className="w-full resize-none rounded-lg border border-slate-200 px-3 py-2 text-xs outline-none focus:border-slate-400"
+                                />
+                            </div>
+
+                        </div>
+
+                        {/* Footer */}
+
+                        <div className="flex justify-end gap-2 border-t border-slate-200 px-5 py-3">
+
+                            <button
+                                type="button"
+                                onClick={() => setEditModalOpen(false)}
+                                className="rounded-lg border border-slate-200 px-3 py-2 text-xs text-slate-500 hover:bg-slate-50"
+                            >
+                                Cancel
+                            </button>
+
+                            <button
+                                type="button"
+                                disabled={editLoading}
+                                onClick={submitDetectionEditRequest}
+                                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-800 px-3 py-2 text-xs font-medium text-white hover:bg-slate-700 disabled:opacity-50"
+                            >
+
+                                {editLoading && (
+                                    <Loader2 className="h-3 w-3 animate-spin" />
+                                )}
+
+                                Submit Request
+                            </button>
+
+                        </div>
+
+                    </div>
+
+                </div>
+            )}
+
         </div>
     );
 }

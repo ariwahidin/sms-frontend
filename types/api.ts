@@ -138,6 +138,8 @@ export interface RiskReport {
   files?: ReportFile[];
   activities?: ReportActivity[];
 
+  edit_requests?: ReportEditRequest[];
+
   created_at: string;
   updated_at: string;
 }
@@ -201,4 +203,43 @@ export interface ReportFilters {
   date_to?: string;
   page?: number;
   page_size?: number;
+}
+
+export type ReportEditRequestStatus =
+    | "pending"
+    | "approved"
+    | "rejected";
+
+export interface ReportEditRequest {
+    id: number;
+    report_id: number;
+
+    location_id?: number | null;
+    department_id?: number | null;
+
+    risk_level: RiskLevel;
+    description: string;
+
+    reason: string;
+
+    requested_by?: number | null;
+    requested_name: string;
+
+    status: ReportEditRequestStatus;
+
+    approved_by?: number | null;
+    approved_name?: string;
+    approved_at?: string | null;
+
+    rejected_by?: number | null;
+    rejected_name?: string;
+    rejected_at?: string | null;
+
+    approval_note?: string;
+
+    created_at: string;
+    updated_at: string;
+
+    location?: Location;
+    department?: Department;
 }

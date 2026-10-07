@@ -1,7 +1,7 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080/api",
+  baseURL: process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8081/api",
   timeout: 15_000,
   headers: { "Content-Type": "application/json" },
 });
@@ -21,7 +21,7 @@ api.interceptors.response.use(
     if (err.response?.status === 401 && typeof window !== "undefined") {
       localStorage.removeItem("sms_token");
       localStorage.removeItem("sms_user");
-      // window.location.href = "/login";
+      window.location.href = "/login";
     }
     return Promise.reject(err);
   }
